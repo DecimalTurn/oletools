@@ -2149,7 +2149,7 @@ def detect_autoexec(vba_code, obfuscation=None):
 
     :param vba_code: str, VBA source code
     :param obfuscation: None or str, name of obfuscation to be added to description
-    :return: list of str tuples (keyword, description)
+    :return: list of str tuples (keyword, description, line_number)
     """
     #TODO: merge code with detect_suspicious
     # case-insensitive search
@@ -2166,7 +2166,8 @@ def detect_autoexec(vba_code, obfuscation=None):
             match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
-                results.append((found_keyword, description + obf_text))
+                line_num = vba_code.count('\n', 0,  match.start()) + 1
+                results.append((found_keyword, description + obf_text, line_num))
     # 2) regex
     for description, keywords in AUTOEXEC_KEYWORDS_REGEX.items():
         for keyword in keywords:
@@ -2175,7 +2176,8 @@ def detect_autoexec(vba_code, obfuscation=None):
             match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
-                results.append((found_keyword, description + obf_text))
+                line_num = vba_code.count('\n', 0,  match.start()) + 1
+                results.append((found_keyword, description + obf_text, line_num))
     return results
 
 
@@ -2520,7 +2522,7 @@ class VBA_Scanner(object):
 
         :param include_decoded_strings: bool, if True, all encoded strings will be included with their decoded content.
         :param deobfuscate: bool, if True attempt to deobfuscate VBA expressions (slow)
-        :return: list of tuples (type, keyword, description)
+        :return: list of tuples (type, keyword, description, line_number)
         (type = 'AutoExec', 'Suspicious', 'IOC', 'Hex String', 'Base64 String' or 'Dridex String')
         """
         # First, detect and extract hex-encoded strings:
