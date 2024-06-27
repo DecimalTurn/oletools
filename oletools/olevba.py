@@ -565,6 +565,9 @@ TYPE_TEXT = 'Text'
 TYPE_PPT = 'PPT'
 TYPE_SLK = 'SLK'
 
+# code headers
+SLK_HEADER = 'Formulas and XLM/Excel 4 macros extracted from SLK file:'
+
 # short tag to display file types in triage mode:
 TYPE2TAG = {
     TYPE_OLE: 'OLE:',
@@ -3132,7 +3135,7 @@ class VBA_Parser(object):
         log.info('Opening SLK file %s' % self.filename)
         xlm_macro_found = False
         xlm_macros = []
-        xlm_macros.append('Formulas and XLM/Excel 4 macros extracted from SLK file:')
+        xlm_macros.append(SLK_HEADER)
         for line in data.splitlines(False):
             if line.startswith(b'O'):
                 # Option: "O;E" indicates a macro sheet, must appear before NN and C rows
@@ -3155,6 +3158,9 @@ class VBA_Parser(object):
             self.xlm_macros = xlm_macros
         self.type = TYPE_SLK
 
+    def is_slk(code)
+        if code.startswith(SLK_HEADER):
+            return True
 
     def open_text(self, data):
         """
