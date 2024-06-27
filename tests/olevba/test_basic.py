@@ -143,6 +143,7 @@ class TestOlevbaBasic(unittest.TestCase):
                     self.assertIn('ALERT(', code)
                 self.assertIn('HALT()', code)
 
+                print(result['analysis'])
                 self.assertIn(len(result['analysis']), (2, 3))
                 types = [entry['type'] for entry in result['analysis']]
                 keywords = [entry['keyword'] for entry in result['analysis']]
