@@ -2180,7 +2180,7 @@ def detect_autoexec(vba_code, obfuscation=None):
     results = []
     obf_text = ''
     re_start =""
-    if vba_code.startswith(SLK_HEADER):
+    if vba_code.startswith('\' ' + SLK_HEADER):
         re_start = r'(?i)\b'
     else:
         re_start = r'(?i)^(?:[^\']|\b).*\b'
@@ -2220,7 +2220,7 @@ def detect_suspicious(vba_code, obfuscation=None):
     #vba_code = vba_code.lower()
     results = []
     obf_text = ''
-    if vba_code.startswith(SLK_HEADER):
+    if vba_code.startswith('\' ' + SLK_HEADER):
         re_start = r'(?i)\b'
     else:
         re_start = r'(?i)^(?:[^\']|\b).*\b'
