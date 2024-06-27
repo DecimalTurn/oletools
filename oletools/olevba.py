@@ -2180,7 +2180,7 @@ def detect_autoexec(vba_code, obfuscation=None):
     results = []
     obf_text = ''
     re_start =""
-    if is_slk(vba_code):
+    if vba_code.startswith(SLK_HEADER):
         re_start = r'(?i)\b'
     else:
         re_start = r'(?i)^(?:[^\']|\b).*\b'
@@ -2220,7 +2220,7 @@ def detect_suspicious(vba_code, obfuscation=None):
     #vba_code = vba_code.lower()
     results = []
     obf_text = ''
-    if is_slk(vba_code):
+    if vba_code.startswith(SLK_HEADER):
         re_start = r'(?i)\b'
     else:
         re_start = r'(?i)^(?:[^\']|\b).*\b'
@@ -3166,10 +3166,6 @@ class VBA_Parser(object):
             self.contains_xlm_macros = True
             self.xlm_macros = xlm_macros
         self.type = TYPE_SLK
-
-    def is_slk(code):
-        if code.startswith(SLK_HEADER):
-            return True
 
     def open_text(self, data):
         """
