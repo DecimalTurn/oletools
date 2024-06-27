@@ -2,9 +2,9 @@ name: Python package
 
 on:
   push:
-    branches: [master]
+    branches: [skip_comment2]
   pull_request:
-    branches: [master]
+    branches: [skip_comment2]
 
 jobs:
   check:
