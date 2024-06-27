@@ -565,7 +565,7 @@ TYPE_TEXT = 'Text'
 TYPE_PPT = 'PPT'
 TYPE_SLK = 'SLK'
 
-# code headers
+# code header(s):
 SLK_HEADER = 'Formulas and XLM/Excel 4 macros extracted from SLK file:'
 
 # short tag to display file types in triage mode:
@@ -2179,6 +2179,11 @@ def detect_autoexec(vba_code, obfuscation=None):
     #vba_code = vba_code.lower()
     results = []
     obf_text = ''
+    re_start =""
+    if is_slk(vba_code):
+        re_start = r'(?i)\b'
+    else:
+        re_start = r'(?i)^(?:[^\']|\b).*\b'
     if obfuscation:
         obf_text = ' (obfuscation: %s)' % obfuscation
     # 1) simple strings, without regex
@@ -2186,7 +2191,7 @@ def detect_autoexec(vba_code, obfuscation=None):
         for keyword in keywords:
             #TODO: if keyword is already a compiled regex, use it as-is
             # search using regex to detect word boundaries:
-            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + re.escape(keyword) + r'\b', vba_code)
+            match = re.search(re_start + re.escape(keyword) + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -2195,7 +2200,7 @@ def detect_autoexec(vba_code, obfuscation=None):
         for keyword in keywords:
             #TODO: if keyword is already a compiled regex, use it as-is
             # search using regex to detect word boundaries:
-            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + keyword + r'\b', vba_code)
+            match = re.search(re_start + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -2215,13 +2220,17 @@ def detect_suspicious(vba_code, obfuscation=None):
     #vba_code = vba_code.lower()
     results = []
     obf_text = ''
+    if is_slk(vba_code):
+        re_start = r'(?i)\b'
+    else:
+        re_start = r'(?i)^(?:[^\']|\b).*\b'
     if obfuscation:
         obf_text = ' (obfuscation: %s)' % obfuscation
     for description, keywords in SUSPICIOUS_KEYWORDS.items():
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must be escaped if it contains special chars such as '\'
-            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + re.escape(keyword) + r'\b', vba_code)
+            match = re.search(re_start + re.escape(keyword) + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -2229,7 +2238,7 @@ def detect_suspicious(vba_code, obfuscation=None):
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must NOT be escaped because it is an actual regex
-            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + keyword + r'\b', vba_code)
+            match = re.search(re_start + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -3158,7 +3167,7 @@ class VBA_Parser(object):
             self.xlm_macros = xlm_macros
         self.type = TYPE_SLK
 
-    def is_slk(code)
+    def is_slk(code):
         if code.startswith(SLK_HEADER):
             return True
 
