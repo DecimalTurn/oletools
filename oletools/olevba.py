@@ -2186,7 +2186,7 @@ def detect_autoexec(vba_code, obfuscation=None):
         for keyword in keywords:
             #TODO: if keyword is already a compiled regex, use it as-is
             # search using regex to detect word boundaries:
-            match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
+            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + re.escape(keyword) + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -2195,7 +2195,7 @@ def detect_autoexec(vba_code, obfuscation=None):
         for keyword in keywords:
             #TODO: if keyword is already a compiled regex, use it as-is
             # search using regex to detect word boundaries:
-            match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
+            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -2221,7 +2221,7 @@ def detect_suspicious(vba_code, obfuscation=None):
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must be escaped if it contains special chars such as '\'
-            match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
+            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + re.escape(keyword) + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
@@ -2229,7 +2229,7 @@ def detect_suspicious(vba_code, obfuscation=None):
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must NOT be escaped because it is an actual regex
-            match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
+            match = re.search(r'(?i)^(?:[^\']|\b).*\b' + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
                 results.append((found_keyword, description + obf_text))
