@@ -917,7 +917,10 @@ re_printable_string = re.compile(b'[\\t\\r\\n\\x20-\\xFF]{5,}')
 
 # Enable PackRat for better performance:
 # (see https://pythonhosted.org/pyparsing/pyparsing.ParserElement-class.html#enablePackrat)
-ParserElement.enablePackrat()
+if hasattr(ParserElement, 'enable_packrat'):
+    ParserElement.enable_packrat()
+else:
+    ParserElement.enablePackrat()
 
 # VBA identifier chars (from MS-VBAL 3.3.5)
 vba_identifier_chars = alphanums + '_'
