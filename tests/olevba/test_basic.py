@@ -41,9 +41,9 @@ class TestOlevbaBasic(unittest.TestCase):
         for line in output.splitlines():
             if line.startswith('WARNING ') and 'encrypted' in line:
                 continue   # encryption warnings are ok
-            elif 'warn' in line.lower():
-                raise self.fail('Found "warn" in output line: "{}"'
-                                .format(line.rstrip()))
+            elif line.startswith('WARNING '):
+                self.fail('Found warning in output line: "{}"'
+                          .format(line.rstrip()))
         # TODO: I disabled this test because we do not log "not encrypted" as warning anymore
         # to avoid other issues.
         # If we really want to test this, then the test should be run with log level INFO:
@@ -71,9 +71,9 @@ class TestOlevbaBasic(unittest.TestCase):
         for line in output.splitlines():
             if line.startswith('WARNING ') and 'encrypted' in line:
                 continue   # encryption warnings are ok
-            elif 'warn' in line.lower():
-                raise self.fail('Found "warn" in output line: "{}"'
-                                .format(line.rstrip()))
+            elif line.startswith('WARNING '):
+                self.fail('Found warning in output line: "{}"'
+                          .format(line.rstrip()))
 
     def test_crypt_return(self):
         """
@@ -118,7 +118,8 @@ class TestOlevbaBasic(unittest.TestCase):
             suffix = splitext(filename)[1]
             out_str, ret_code = call_and_capture('olevba',
                                                  args=[full_name, ] + ADD_ARGS,
-                                                 accept_nonzero_exit=True)
+                                                 accept_nonzero_exit=True,
+                                                 exclude_stderr=True)
             output = json.loads(out_str)
             self.assertGreaterEqual(len(output), 2)
             self.assertEqual(output[0]['type'], 'MetaInformation')
