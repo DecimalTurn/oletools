@@ -2750,6 +2750,8 @@ class VBA_Parser(object):
         self.pcodedmp_output = None
         #: Flag set to True/False if VBA stomping detected
         self.vba_stomping_detected = None
+        #: P-code identifiers and string literals not found in the VBA source
+        self.vba_stomping_items = []
         # will be set to True or False by detect_is_encrypted method
         self.is_encrypted = False
         # TODO: those are disabled for now:
@@ -3978,7 +3980,7 @@ class VBA_Parser(object):
                         # directly present in the VBA source code
                         # (for example "Me" in VBA appears as id_FFFF in P-code)
                         if not name.startswith('id_'):
-                            keywords.add(name)
+                            keywords.add(('identifier', name))
                     if mnemonic == 'LitStr':
                         # re_string = re.compile(r'\"([^\"]|\"\")*\"')
                         # for match in re_string.finditer(line):
@@ -3995,17 +3997,17 @@ class VBA_Parser(object):
                             s = s[1:-1]
                             s = s.replace('"', '""')
                             s = '"' + s + '"'
-                        keywords.add(s)
+                        keywords.add(('string literal', s))
             log.debug('Keywords extracted from P-code: ' + repr(sorted(keywords)))
-            self.vba_stomping_detected = False
             # get all VBA code as one string
             vba_code_all_modules = self.get_vba_code_all_modules()
-            for keyword in keywords:
+            self.vba_stomping_items = []
+            for kind, keyword in sorted(keywords):
                 if keyword not in vba_code_all_modules:
                     log.debug('Keyword {!r} not found in VBA code'.format(keyword))
                     log.debug('VBA STOMPING DETECTED!')
-                    self.vba_stomping_detected = True
-                    break
+                    self.vba_stomping_items.append({'kind': kind, 'value': keyword})
+            self.vba_stomping_detected = bool(self.vba_stomping_items)
             if not self.vba_stomping_detected:
                 log.debug('No VBA stomping detected.')
         return self.vba_stomping_detected
