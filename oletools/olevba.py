@@ -3629,10 +3629,12 @@ class VBA_Parser(object):
         return self.modules
 
 
-    def get_vba_code_all_modules(self):
+    def get_vba_code_all_modules(self, include_pcode=True):
         """
         Extract the VBA macro source code from all modules, and return it
         as a single string (str) with all modules concatenated.
+        If include_pcode is True, include the synthetic P-code module when
+        stomping has been detected.
         If an exception is triggered when decompressing a VBA module, it
         will not be included. The error is logged but the exception is not
         raised further.
@@ -3640,7 +3642,7 @@ class VBA_Parser(object):
         """
         vba_code_all_modules = ''
         for (_, stream_path, _, vba_code) in self.extract_all_macros():
-            if stream_path == 'VBA P-code':
+            if not include_pcode and stream_path == 'VBA P-code':
                 continue
             if not isinstance(vba_code, str):
                 log.error('VBA code returned by extract_all_macros is not a string')
@@ -3703,6 +3705,42 @@ class VBA_Parser(object):
             self.nb_vbastrings += vbastrings
 
         return self.analysis_results
+
+
+    def analyze_macros_by_source(self, show_decoded_strings=False, deobfuscate=False):
+        """
+        Analyze VBA source and P-code separately.
+
+        :return: dict with separate result lists for VBA source and P-code
+        """
+        findings = {'vba_source': [], 'pcode': []}
+        if not self.detect_macros():
+            return findings
+
+        source_code = self.get_vba_code_all_modules(include_pcode=False)
+        for (_, _, form_string) in self.extract_form_strings():
+            source_code += form_string + '\n'
+        source_scanner = VBA_Scanner(source_code)
+        findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
+
+        pcode = self.extract_pcode() or ''
+        pcode_comments = ''.join("' {}\n".format(line) for line in pcode.splitlines())
+        pcode_scanner = VBA_Scanner(pcode_comments)
+        findings['pcode'] = pcode_scanner.scan(show_decoded_strings, deobfuscate)
+
+        if self.contains_xlm_macros:
+            findings['vba_source'].append((
+                'Suspicious', 'XLM macro',
+                'XLM macro found. It may contain malicious code',
+            ))
+        if self.template_injection_found:
+            findings['vba_source'].append((
+                'Suspicious', 'Template Injection',
+                'Template injection found. A malicious template could have been uploaded '
+                'from a remote location',
+            ))
+
+        return findings
 
 
     def reveal(self):
@@ -4002,7 +4040,7 @@ class VBA_Parser(object):
                         keywords.add(('string literal', s))
             log.debug('Keywords extracted from P-code: ' + repr(sorted(keywords)))
             # get all VBA code as one string
-            vba_code_all_modules = self.get_vba_code_all_modules()
+            vba_code_all_modules = self.get_vba_code_all_modules(include_pcode=False)
             self.vba_stomping_items = []
             for kind, keyword in sorted(keywords):
                 if keyword not in vba_code_all_modules:

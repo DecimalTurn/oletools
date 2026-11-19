@@ -15,7 +15,7 @@ class TestVBAStompingDetails(unittest.TestCase):
         parser.file_on_disk = True
         parser.pcodedmp_output = pcode
         parser.extract_pcode = lambda: pcode
-        parser.get_vba_code_all_modules = lambda: source
+        parser.get_vba_code_all_modules = lambda **kwargs: source
         return parser
 
     def test_reports_missing_identifiers_and_string_literals(self):
@@ -49,7 +49,20 @@ class TestVBAStompingDetails(unittest.TestCase):
                 {'kind': 'identifier', 'value': 'MsgBox'},
                 parser.vba_stomping_items,
             )
-            self.assertNotIn('Document_Open', parser.get_vba_code_all_modules())
+            source = parser.get_vba_code_all_modules(include_pcode=False)
+            analyzed_code = parser.get_vba_code_all_modules()
+            self.assertNotIn('Document_Open', source)
+            self.assertIn('Document_Open', analyzed_code)
+            self.assertIn(('Suspicious', 'Shell', 'May run an executable file or a system command'), parser.analyze_macros())
+            grouped_findings = parser.analyze_macros_by_source()
+            self.assertIn(
+                ('Suspicious', 'Shell', 'May run an executable file or a system command'),
+                grouped_findings['pcode'],
+            )
+            self.assertNotIn(
+                ('Suspicious', 'Shell', 'May run an executable file or a system command'),
+                grouped_findings['vba_source'],
+            )
             self.assertTrue(any(
                 module[2] == 'VBA_P-code.txt'
                 for module in parser.extract_all_macros()
