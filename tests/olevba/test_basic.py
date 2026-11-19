@@ -130,9 +130,15 @@ class TestOlevbaBasic(unittest.TestCase):
                 result = entry
                 break
             self.assertTrue(result['json_conversion_successful'])
-            if suffix in ('.xlsb', '.xltm', '.xlsm'):
-                # TODO: cannot extract xlm macros for these types yet
+            if suffix == '.xlsb':
+                # TODO: cannot extract xlm macros from XLSB files yet
                 self.assertEqual(result['macros'], [])
+            elif suffix in ('.xltm', '.xlsm'):
+                self.assertTrue(result['macros'])
+                types = [entry['type'] for entry in result['analysis']]
+                keywords = [entry['keyword'] for entry in result['analysis']]
+                self.assertIn('XLM macro', keywords)
+                self.assertIn('Suspicious', types)
             else:
                 code = result['macros'][0]['code']
                 if suffix == '.slk':

@@ -2858,6 +2858,16 @@ class VBA_Parser(object):
         log.info('Opening ZIP/OpenXML file %s' % self.filename)
         try:
             z = zipfile.ZipFile(_file)
+            try:
+                content_types = ET.fromstring(z.read('[Content_Types].xml'))
+                self.xlm_macrosheet_found = any(
+                    element.tag.rsplit('}', 1)[-1] == 'Override'
+                    and element.attrib.get('ContentType', '').lower()
+                    == 'application/vnd.ms-excel.macrosheet+xml'
+                    for element in content_types
+                )
+            except (KeyError, ET.ParseError):
+                pass
             #TODO: check if this is actually an OpenXML file
             #TODO: if the zip file is encrypted, suggest to use the -z option, or try '-z infected' automatically
             # check each file within the zip if it is an OLE file, by reading its magic:
@@ -3394,9 +3404,17 @@ class VBA_Parser(object):
                 log.warning('XLMMacroDeobfuscator only works with files on disk, not in memory. Analysis might be less complete.')
             else:
                 try:
-                    return self._extract_xlm_xlmdeobf()
+                    if self._extract_xlm_xlmdeobf():
+                        return True
                 except Exception:
                     log.error('Error when running XLMMacroDeobfuscator')
+        if self.xlm_macrosheet_found:
+            self.contains_xlm_macros = True
+            if not self.xlm_macros:
+                self.xlm_macros = [
+                    'Excel 4.0 macro sheet found in OpenXML package; formula extraction unavailable'
+                ]
+            return True
         # fall back to plugin_biff:
         if self.ole_file is None:
             # TODO: handle OpenXML here
