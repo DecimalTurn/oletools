@@ -3,4 +3,4 @@ olefile>=0.46
 easygui
 colorclass
 msoffcrypto-tool; platform_python_implementation!="PyPy" or (python_version>="3" and platform_system!="Windows" and platform_system!="Darwin")
-pcodedmp>=1.2.5
+pcodedmp @ git+https://github.com/DecimalTurn/pcodedmp.git@7032cb406f2f845818c4eb8f7939323dd72b09fc
