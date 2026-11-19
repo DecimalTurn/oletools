@@ -82,7 +82,8 @@ class TestOleIDBasic(unittest.TestCase):
                                  .format(value_dict['codepage'], filename))
                 self.assertIn(value_dict['author'],
                               (b'user', b'schulung',
-                               b'xxxxxxxxxxxx', b'zzzzzzzzzzzz'),
+                               b'xxxxxxxxxxxx', b'zzzzzzzzzzzz',
+                               b'Martin Leduc'),
                               'Unexpected result {0!r} for author of sample {1}'
                               .format(value_dict['author'], filename))
 
@@ -119,6 +120,7 @@ class TestOleIDBasic(unittest.TestCase):
             join('msodde', 'dde-in-csv.csv'),     # "Windows" "calc.exe"
             join('msodde', 'dde-in-excel2003.xml'),   # same as above
             join('oleform', 'oleform-PR314.docm'),
+            join('olevba', 'macrofile_stomp.doc'),
             join('basic', 'empty'),                   # WTF?
             join('basic', 'text'),
         )

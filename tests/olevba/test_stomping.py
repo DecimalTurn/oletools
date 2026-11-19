@@ -1,6 +1,8 @@
+import os
 import unittest
 
 from oletools.olevba import TYPE_OLE, VBA_Parser
+from tests.test_utils import DATA_BASE_DIR
 
 
 class TestVBAStompingDetails(unittest.TestCase):
@@ -36,6 +38,24 @@ class TestVBAStompingDetails(unittest.TestCase):
 
         self.assertFalse(parser.detect_vba_stomping())
         self.assertEqual(parser.vba_stomping_items, [])
+
+    def test_detects_stomping_in_document_fixture_in_app_order(self):
+        filename = os.path.join(DATA_BASE_DIR, 'olevba', 'macrofile_stomp.doc')
+        parser = VBA_Parser(filename)
+        try:
+            self.assertTrue(parser.detect_vba_macros())
+            self.assertTrue(parser.detect_vba_stomping())
+            self.assertIn(
+                {'kind': 'identifier', 'value': 'MsgBox'},
+                parser.vba_stomping_items,
+            )
+            self.assertNotIn('Document_Open', parser.get_vba_code_all_modules())
+            self.assertTrue(any(
+                module[2] == 'VBA_P-code.txt'
+                for module in parser.extract_all_macros()
+            ))
+        finally:
+            parser.close()
 
 
 if __name__ == '__main__':

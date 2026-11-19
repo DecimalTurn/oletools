@@ -3639,7 +3639,9 @@ class VBA_Parser(object):
         :return: str
         """
         vba_code_all_modules = ''
-        for (_, _, _, vba_code) in self.extract_all_macros():
+        for (_, stream_path, _, vba_code) in self.extract_all_macros():
+            if stream_path == 'VBA P-code':
+                continue
             if not isinstance(vba_code, str):
                 log.error('VBA code returned by extract_all_macros is not a string')
             else:
