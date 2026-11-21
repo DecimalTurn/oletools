@@ -8,6 +8,8 @@ from os.path import join, splitext
 import re
 import json
 
+from oletools.olevba import VBA_Parser
+
 # Directory with test data, independent of current working directory
 from tests.test_utils import DATA_BASE_DIR, call_and_capture
 
@@ -157,6 +159,46 @@ class TestOlevbaBasic(unittest.TestCase):
                 self.assertIn('XLM macro', keywords)
                 self.assertIn('AutoExec', types)
                 self.assertIn('Suspicious', types)
+
+    def test_xlm_openxml_analysis_is_separate_from_vba_source(self):
+        filename = join(DATA_BASE_DIR, 'excel4-macros', 'excel4_sample_macro.xlsm')
+        parser = VBA_Parser(filename)
+        try:
+            self.assertTrue(parser.detect_xlm_macros())
+            xlm_sources = parser.extract_xlm_macros()
+            self.assertEqual(len(xlm_sources), 1)
+            self.assertEqual(xlm_sources[0][0], 'Sheet Macro1 (xl/macrosheets/sheet1.xml)')
+            self.assertIn('ALERT(', xlm_sources[0][1])
+            self.assertIn('HALT()', xlm_sources[0][1])
+
+            vba_source = parser.get_vba_code_all_modules(include_pcode=False, include_xlm=False)
+            self.assertNotIn('ALERT(', vba_source)
+            self.assertNotIn('Excel 4.0 macro sheet found', vba_source)
+
+            source_findings = parser.analyze_macros_by_source()['vba_source']
+            xlm_findings = parser.analyze_xlm_macros()
+            self.assertNotIn('XLM macro', [finding[1] for finding in source_findings])
+            self.assertIn('XLM macro', [finding[1] for finding in xlm_findings])
+        finally:
+            parser.close()
+
+    def test_xlm_legacy_analysis_is_separate_from_vba_source(self):
+        filename = join(DATA_BASE_DIR, 'excel4-macros', 'excel4_sample_macro.xls')
+        parser = VBA_Parser(filename)
+        try:
+            self.assertTrue(parser.detect_xlm_macros())
+            xlm_sources = parser.extract_xlm_macros()
+            self.assertEqual(len(xlm_sources), 1)
+            self.assertIn('Excel 4.0 macro sheet: Macro', xlm_sources[0][0])
+            self.assertIn('A1: =ALERT(', xlm_sources[0][1])
+            self.assertIn('A2: =HALT()', xlm_sources[0][1])
+
+            source_findings = parser.analyze_macros_by_source()['vba_source']
+            xlm_findings = parser.analyze_xlm_macros()
+            self.assertNotIn('XLM macro', [finding[1] for finding in source_findings])
+            self.assertIn('XLM macro', [finding[1] for finding in xlm_findings])
+        finally:
+            parser.close()
 
     def test_dir_stream_record_project_compat_version(self):
         """Test PROJECTCOMPATVERSION record on dir stream with a ppt file."""

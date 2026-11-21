@@ -276,6 +276,8 @@ import struct
 from io import BytesIO, StringIO
 import math
 import zipfile
+import csv
+import posixpath
 import re
 import argparse
 import binascii
@@ -3647,7 +3649,7 @@ class VBA_Parser(object):
         return self.modules
 
 
-    def get_vba_code_all_modules(self, include_pcode=True):
+    def get_vba_code_all_modules(self, include_pcode=True, include_xlm=True):
         """
         Extract the VBA macro source code from all modules, and return it
         as a single string (str) with all modules concatenated.
@@ -3661,6 +3663,8 @@ class VBA_Parser(object):
         vba_code_all_modules = ''
         for (_, stream_path, _, vba_code) in self.extract_all_macros():
             if not include_pcode and stream_path == 'VBA P-code':
+                continue
+            if not include_xlm and stream_path == 'xlm_macro':
                 continue
             if not isinstance(vba_code, str):
                 log.error('VBA code returned by extract_all_macros is not a string')
@@ -3735,7 +3739,7 @@ class VBA_Parser(object):
         if not self.detect_macros():
             return findings
 
-        source_code = self.get_vba_code_all_modules(include_pcode=False)
+        source_code = self.get_vba_code_all_modules(include_pcode=False, include_xlm=False)
         for (_, _, form_string) in self.extract_form_strings():
             source_code += form_string + '\n'
         source_scanner = VBA_Scanner(source_code)
@@ -3746,11 +3750,6 @@ class VBA_Parser(object):
         pcode_scanner = VBA_Scanner(pcode_comments)
         findings['pcode'] = pcode_scanner.scan(show_decoded_strings, deobfuscate)
 
-        if self.contains_xlm_macros:
-            findings['vba_source'].append((
-                'Suspicious', 'XLM macro',
-                'XLM macro found. It may contain malicious code',
-            ))
         if self.template_injection_found:
             findings['vba_source'].append((
                 'Suspicious', 'Template Injection',
@@ -3758,6 +3757,132 @@ class VBA_Parser(object):
                 'from a remote location',
             ))
 
+        return findings
+
+
+    def extract_xlm_macros(self):
+        """Return XLM macro text grouped by worksheet location.
+
+        Each result is a ``(location, code)`` tuple. Formula cells in
+        OpenXML macro sheets and legacy BIFF macro sheets are kept separate
+        so callers can label each section in an export.
+        """
+        if not self.detect_xlm_macros():
+            return []
+
+        if self.type == TYPE_OpenXML and self.file_on_disk:
+            sources = self._extract_xlm_openxml_macros()
+            if sources:
+                return sources
+
+        if self.ole_file is not None:
+            sources = self._extract_xlm_biff_macros()
+            if sources:
+                return sources
+
+        if self.xlm_macros:
+            return [(self.filename or 'XLM macro data', '\n'.join(self.xlm_macros))]
+        return []
+
+
+    def _extract_xlm_openxml_macros(self):
+        """Extract formula cells from OpenXML macro sheets with sheet names."""
+        spreadsheet_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+        relationship_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+        package_relationship_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
+        try:
+            with zipfile.ZipFile(self.filename) as package:
+                workbook = ET.fromstring(package.read('xl/workbook.xml'))
+                relationships = ET.fromstring(package.read('xl/_rels/workbook.xml.rels'))
+                rels_by_id = {
+                    relationship.attrib.get('Id'): relationship.attrib
+                    for relationship in relationships.findall(
+                        '{%s}Relationship' % package_relationship_ns
+                    )
+                }
+                sources = []
+                for sheet in workbook.iter('{%s}sheet' % spreadsheet_ns):
+                    relationship_id = sheet.attrib.get('{%s}id' % relationship_ns)
+                    relationship = rels_by_id.get(relationship_id, {})
+                    if not relationship.get('Type', '').endswith('/xlMacrosheet'):
+                        continue
+                    if relationship.get('TargetMode') == 'External':
+                        continue
+                    target = relationship.get('Target', '')
+                    part_name = (
+                        posixpath.normpath(target.lstrip('/'))
+                        if target.startswith('/')
+                        else posixpath.normpath(posixpath.join('xl', target))
+                    )
+                    macro_sheet = ET.fromstring(package.read(part_name))
+                    formula_lines = []
+                    for cell in macro_sheet.iter('{%s}c' % spreadsheet_ns):
+                        formula = cell.find('{%s}f' % spreadsheet_ns)
+                        if formula is not None and formula.text:
+                            formula_lines.append(
+                                '{}: ={}'.format(cell.attrib.get('r', '?'), formula.text)
+                            )
+                    location = 'Sheet {} ({})'.format(sheet.attrib.get('name', 'Macro sheet'), part_name)
+                    if formula_lines:
+                        sources.append((location, '\n'.join(formula_lines)))
+                    else:
+                        sources.append((location, 'No formula cells were extracted.'))
+                return sources
+        except (KeyError, OSError, zipfile.BadZipfile, ET.ParseError):
+            return []
+
+
+    def _extract_xlm_biff_macros(self):
+        """Group the legacy BIFF CSV formulas by macro-sheet name."""
+        macro_sheets = {}
+        for line in self.xlm_macros:
+            if 'Excel 4.0 macro sheet' in line:
+                sheet_name = line.rsplit(' - ', 1)[-1].strip().lstrip('\x00')
+                if sheet_name:
+                    macro_sheets[sheet_name.casefold()] = sheet_name
+        if not macro_sheets:
+            return []
+
+        in_formula_table = False
+        formulas_by_sheet = {name: [] for name in macro_sheets.values()}
+        for line in self.xlm_macros:
+            if line.strip().casefold() == 'sheet,reference,formula,value':
+                in_formula_table = True
+                continue
+            if not in_formula_table:
+                continue
+            try:
+                row = next(csv.reader([line]))
+            except csv.Error:
+                continue
+            if len(row) < 3:
+                continue
+            sheet_name = row[0].strip().lstrip('\x00')
+            canonical_name = next(
+                (name for key, name in macro_sheets.items() if key == sheet_name.casefold()),
+                None,
+            )
+            if canonical_name:
+                formulas_by_sheet[canonical_name].append('{}: ={}'.format(row[1], row[2]))
+
+        return [
+            ('Excel 4.0 macro sheet: {}'.format(name), '\n'.join(formulas))
+            for name, formulas in formulas_by_sheet.items()
+            if formulas
+        ]
+
+
+    def analyze_xlm_macros(self, show_decoded_strings=False, deobfuscate=False):
+        """Analyze XLM macro formulas separately from VBA source and P-code."""
+        if not self.detect_xlm_macros():
+            return []
+        sources = self.extract_xlm_macros()
+        code = '\n'.join(source for _, source in sources)
+        findings = VBA_Scanner(code).scan(show_decoded_strings, deobfuscate)
+        findings.append((
+            'Suspicious', 'XLM macro',
+            'XLM macro found. It may contain malicious code',
+        ))
         return findings
 
 
