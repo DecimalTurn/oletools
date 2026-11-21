@@ -8,7 +8,7 @@ from os.path import join, splitext
 import re
 import json
 
-from oletools.olevba import VBA_Parser
+from oletools.olevba import VBA_Parser, VBA_Scanner
 
 # Directory with test data, independent of current working directory
 from tests.test_utils import DATA_BASE_DIR, call_and_capture
@@ -16,6 +16,25 @@ from tests.test_utils import DATA_BASE_DIR, call_and_capture
 
 class TestOlevbaBasic(unittest.TestCase):
     """Tests olevba basic functionality"""
+
+    def test_scanner_ignores_vba_comments_without_losing_later_code(self):
+        source = (
+            "' Auto_Open\n"
+            "Sub SafeRoutine()\n"
+            "    Call Shell(\"safe\") ' Auto_Close\n"
+            "    Rem Workbook_Open\n"
+            "    Debug.Print \"O'Brien\"\n"
+            "End Sub"
+        )
+        scanner = VBA_Scanner(source)
+        findings = scanner.scan()
+        keywords = [keyword for _, keyword, _ in findings]
+
+        self.assertIn('Shell', keywords)
+        self.assertNotIn('Auto_Open', keywords)
+        self.assertNotIn('Auto_Close', keywords)
+        self.assertNotIn('Workbook_Open', keywords)
+        self.assertIn('O\'Brien', scanner.code)
 
     def test_text_behaviour(self):
         """Test behaviour of olevba when presented with pure text file."""

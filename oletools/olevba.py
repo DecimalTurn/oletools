@@ -2166,6 +2166,36 @@ def filter_vba(vba_code):
     return vba
 
 
+def _remove_vba_comments(vba_code):
+    """Remove apostrophe and Rem comments without altering string literals."""
+    filtered_lines = []
+    for line in vba_code.splitlines():
+        in_string = False
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if char == '"':
+                if in_string and index + 1 < len(line) and line[index + 1] == '"':
+                    index += 2
+                    continue
+                in_string = not in_string
+            elif not in_string:
+                if char == "'":
+                    break
+                if line[index:index + 3].lower() == 'rem':
+                    starts_statement = (
+                        index == 0 or line[index - 1].isspace() or line[index - 1] == ':'
+                    )
+                    ends_keyword = (
+                        index + 3 == len(line) or line[index + 3].isspace()
+                    )
+                    if starts_statement and ends_keyword:
+                        break
+            index += 1
+        filtered_lines.append(line[:index])
+    return '\n'.join(filtered_lines)
+
+
 def detect_autoexec(vba_code, obfuscation=None):
     """
     Detect if the VBA code contains keywords corresponding to macros running
@@ -2512,14 +2542,17 @@ class VBA_Scanner(object):
     suspicious keywords, IOCs, auto-executable macros, etc.
     """
 
-    def __init__(self, vba_code):
+    def __init__(self, vba_code, skip_comments=True):
         """
         VBA_Scanner constructor
 
         :param vba_code: str, VBA source code to be analyzed
+        :param skip_comments: bool, whether to ignore VBA comments
         """
         # join long lines ending with " _":
         self.code = vba_collapse_long_lines(vba_code)
+        if skip_comments:
+            self.code = _remove_vba_comments(self.code)
         self.code_hex = ''
         self.code_hex_rev = ''
         self.code_rev_hex = ''
@@ -3693,8 +3726,17 @@ class VBA_Parser(object):
                 self.vba_code_all_modules = self.get_vba_code_all_modules()
                 for (_, _, form_string) in self.extract_form_strings():
                     self.vba_code_all_modules += form_string + '\n'
-            # Analyze the whole code at once:
-            scanner = VBA_Scanner(self.vba_code_all_modules)
+            # Keep synthetic P-code and XLM comment streams while filtering VBA source comments.
+            analysis_modules = []
+            for (_, stream_path, _, vba_code) in self.extract_all_macros():
+                if stream_path in ('VBA P-code', 'xlm_macro'):
+                    analysis_modules.append(vba_code)
+                else:
+                    analysis_modules.append(_remove_vba_comments(vba_code))
+            analysis_code = '\n'.join(analysis_modules)
+            for (_, _, form_string) in self.extract_form_strings():
+                analysis_code += form_string + '\n'
+            scanner = VBA_Scanner(analysis_code, skip_comments=False)
             self.analysis_results = scanner.scan(show_decoded_strings, deobfuscate)
             if self.detect_vba_stomping():
                 log.debug('adding VBA stomping to suspicious keywords')
@@ -3739,15 +3781,17 @@ class VBA_Parser(object):
         if not self.detect_macros():
             return findings
 
-        source_code = self.get_vba_code_all_modules(include_pcode=False, include_xlm=False)
+        source_code = _remove_vba_comments(
+            self.get_vba_code_all_modules(include_pcode=False, include_xlm=False)
+        )
         for (_, _, form_string) in self.extract_form_strings():
             source_code += form_string + '\n'
-        source_scanner = VBA_Scanner(source_code)
+        source_scanner = VBA_Scanner(source_code, skip_comments=False)
         findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
 
         pcode = self.extract_pcode() or ''
         pcode_comments = ''.join("' {}\n".format(line) for line in pcode.splitlines())
-        pcode_scanner = VBA_Scanner(pcode_comments)
+        pcode_scanner = VBA_Scanner(pcode_comments, skip_comments=False)
         findings['pcode'] = pcode_scanner.scan(show_decoded_strings, deobfuscate)
 
         if self.template_injection_found:
@@ -3878,7 +3922,7 @@ class VBA_Parser(object):
             return []
         sources = self.extract_xlm_macros()
         code = '\n'.join(source for _, source in sources)
-        findings = VBA_Scanner(code).scan(show_decoded_strings, deobfuscate)
+        findings = VBA_Scanner(code, skip_comments=False).scan(show_decoded_strings, deobfuscate)
         findings.append((
             'Suspicious', 'XLM macro',
             'XLM macro found. It may contain malicious code',
