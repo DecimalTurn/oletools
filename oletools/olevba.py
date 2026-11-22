@@ -665,9 +665,6 @@ SUSPICIOUS_KEYWORDS = {
     'May write to a file (if combined with Open)':
     #TODO: regex to find Open+Write on same line
         ('Write', 'Put', 'Output', 'Print #'),
-    'May read or write a binary file (if combined with Open)':
-    #TODO: regex to find Open+Binary on same line
-        ('Binary',),
     'May copy a file':
         ('FileCopy', 'CopyFile','CopyHere','CopyFolder'),
     #FileCopy: http://msdn.microsoft.com/en-us/library/office/gg264390%28v=office.15%29.aspx

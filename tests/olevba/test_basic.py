@@ -60,6 +60,11 @@ class TestOlevbaBasic(unittest.TestCase):
             detect_suspicious('Open filePath'),
             [('Open', 'May open a file')],
         )
+        self.assertEqual(
+            detect_suspicious('Open filePath For Input As #1'),
+            [('Open', 'May open a file')],
+        )
+        self.assertEqual(detect_suspicious('Binary'), [])
 
     def test_autoexec_detector_can_include_source_line(self):
         source = 'Private Sub Workbook_Open()\nEnd Sub'
