@@ -2196,7 +2196,7 @@ def _remove_vba_comments(vba_code):
     return '\n'.join(filtered_lines)
 
 
-def detect_autoexec(vba_code, obfuscation=None):
+def detect_autoexec(vba_code, obfuscation=None, include_locations=False):
     """
     Detect if the VBA code contains keywords corresponding to macros running
     automatically when triggered by specific actions (e.g. when a document is
@@ -2204,7 +2204,8 @@ def detect_autoexec(vba_code, obfuscation=None):
 
     :param vba_code: str, VBA source code
     :param obfuscation: None or str, name of obfuscation to be added to description
-    :return: list of str tuples (keyword, description)
+    :param include_locations: include the 1-based source line for each result
+    :return: list of tuples (keyword, description[, line_number])
     """
     #TODO: merge code with detect_suspicious
     # case-insensitive search
@@ -2213,6 +2214,13 @@ def detect_autoexec(vba_code, obfuscation=None):
     obf_text = ''
     if obfuscation:
         obf_text = ' (obfuscation: %s)' % obfuscation
+
+    def append_result(keyword, description, position):
+        result = (keyword, description + obf_text)
+        if include_locations:
+            result += (vba_code.count('\n', 0, position) + 1,)
+        results.append(result)
+
     # 1) simple strings, without regex
     for description, keywords in AUTOEXEC_KEYWORDS.items():
         for keyword in keywords:
@@ -2221,7 +2229,7 @@ def detect_autoexec(vba_code, obfuscation=None):
             match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
-                results.append((found_keyword, description + obf_text))
+                append_result(found_keyword, description, match.start())
     # 2) regex
     for description, keywords in AUTOEXEC_KEYWORDS_REGEX.items():
         for keyword in keywords:
@@ -2230,18 +2238,19 @@ def detect_autoexec(vba_code, obfuscation=None):
             match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
-                results.append((found_keyword, description + obf_text))
+                append_result(found_keyword, description, match.start())
     return results
 
 
-def detect_suspicious(vba_code, obfuscation=None):
+def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
     """
     Detect if the VBA code contains suspicious keywords corresponding to
     potential malware behaviour.
 
     :param vba_code: str, VBA source code
     :param obfuscation: None or str, name of obfuscation to be added to description
-    :return: list of str tuples (keyword, description)
+    :param include_locations: include the 1-based source line for each result
+    :return: list of tuples (keyword, description[, line_number])
     """
     # case-insensitive search
     #vba_code = vba_code.lower()
@@ -2249,14 +2258,24 @@ def detect_suspicious(vba_code, obfuscation=None):
     obf_text = ''
     if obfuscation:
         obf_text = ' (obfuscation: %s)' % obfuscation
+
+    def append_result(keyword, description, position):
+        result = (keyword, description + obf_text)
+        if include_locations:
+            result += (vba_code.count('\n', 0, position) + 1,)
+        results.append(result)
+
     for description, keywords in SUSPICIOUS_KEYWORDS.items():
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must be escaped if it contains special chars such as '\'
-            match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
+            if description == 'May open a file':
+                match = re.search(r'(?im)(?:^[ \t]*|:[ \t]+)(Open)\b', vba_code)
+            else:
+                match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
             if match:
-                found_keyword = match.group()
-                results.append((found_keyword, description + obf_text))
+                found_keyword = match.group(1) if description == 'May open a file' else match.group()
+                append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_REGEX.items():
         for keyword in keywords:
             # search using regex to detect word boundaries:
@@ -2264,13 +2283,14 @@ def detect_suspicious(vba_code, obfuscation=None):
             match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
             if match:
                 found_keyword = match.group()
-                results.append((found_keyword, description + obf_text))
+                append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_NOREGEX.items():
         for keyword in keywords:
             if keyword.lower() in vba_code:
                 # avoid reporting backspace chars out of plain VBA code:
                 if not(keyword=='\b' and obfuscation is not None):
-                    results.append((keyword, description + obf_text))
+                    position = vba_code.lower().find(keyword.lower())
+                    append_result(keyword, description, position)
     return results
 
 
@@ -3777,7 +3797,7 @@ class VBA_Parser(object):
 
         :return: dict with separate result lists for VBA source and P-code
         """
-        findings = {'vba_source': [], 'pcode': []}
+        findings = {'vba_source': [], 'pcode': [], 'vba_source_locations': []}
         if not self.detect_macros():
             return findings
 
@@ -3788,6 +3808,31 @@ class VBA_Parser(object):
             source_code += form_string + '\n'
         source_scanner = VBA_Scanner(source_code, skip_comments=False)
         findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
+
+        source_finding_set = set(findings['vba_source'])
+        located_findings = set()
+        for module_index, (_, stream_path, vba_filename, vba_code) in enumerate(self.extract_macros()):
+            if stream_path in ('VBA P-code', 'xlm_macro'):
+                continue
+            module_code = _remove_vba_comments(vba_code)
+            for finding_type, detector in (
+                    ('AutoExec', detect_autoexec),
+                    ('Suspicious', detect_suspicious)):
+                for keyword, description, line_number in detector(
+                        module_code, include_locations=True):
+                    finding = (finding_type, keyword, description)
+                    signature = (finding_type, keyword.casefold(), description.casefold())
+                    if finding not in source_finding_set or signature in located_findings:
+                        continue
+                    located_findings.add(signature)
+                    findings['vba_source_locations'].append({
+                        'type': finding_type,
+                        'keyword': keyword,
+                        'description': description,
+                        'module_index': module_index,
+                        'module_name': vba_filename,
+                        'line_number': line_number,
+                    })
 
         pcode = self.extract_pcode() or ''
         pcode_comments = ''.join(

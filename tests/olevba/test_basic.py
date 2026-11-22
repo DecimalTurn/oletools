@@ -8,7 +8,7 @@ from os.path import join, splitext
 import re
 import json
 
-from oletools.olevba import VBA_Parser, VBA_Scanner
+from oletools.olevba import VBA_Parser, VBA_Scanner, detect_autoexec, detect_suspicious
 
 # Directory with test data, independent of current working directory
 from tests.test_utils import DATA_BASE_DIR, call_and_capture
@@ -35,6 +35,43 @@ class TestOlevbaBasic(unittest.TestCase):
         self.assertNotIn('Auto_Close', keywords)
         self.assertNotIn('Workbook_Open', keywords)
         self.assertIn('O\'Brien', scanner.code)
+
+    def test_open_indicator_requires_statement_position(self):
+        def has_open_indicator(source):
+            return any(
+                description == 'May open a file'
+                for _, description in detect_suspicious(source)
+            )
+
+        self.assertTrue(has_open_indicator('  Open filePath For Input As #1'))
+        self.assertTrue(has_open_indicator('If ready Then: Open filePath For Input As #1'))
+        self.assertFalse(has_open_indicator('Private Sub Workbook_Open()\nEnd Sub'))
+        self.assertFalse(has_open_indicator('Set workbook = Workbooks.Open(filePath)'))
+        self.assertFalse(has_open_indicator('If ready Then:Open filePath For Input As #1'))
+
+    def test_suspicious_detector_can_include_source_line(self):
+        source = 'Private Sub Workbook_Open()\nEnd Sub\nOpen filePath For Input'
+
+        self.assertEqual(
+            detect_suspicious(source, include_locations=True),
+            [('Open', 'May open a file', 3)],
+        )
+        self.assertEqual(
+            detect_suspicious('Open filePath'),
+            [('Open', 'May open a file')],
+        )
+
+    def test_autoexec_detector_can_include_source_line(self):
+        source = 'Private Sub Workbook_Open()\nEnd Sub'
+
+        self.assertEqual(
+            detect_autoexec(source, include_locations=True),
+            [('Workbook_Open', 'Runs when the Excel Workbook is opened', 1)],
+        )
+        self.assertEqual(
+            detect_autoexec(source),
+            [('Workbook_Open', 'Runs when the Excel Workbook is opened')],
+        )
 
     def test_text_behaviour(self):
         """Test behaviour of olevba when presented with pure text file."""
