@@ -70,6 +70,24 @@ class TestVBAStompingDetails(unittest.TestCase):
         finally:
             parser.close()
 
+    def test_ignores_suspicious_keywords_in_pcode_comments(self):
+        filename = os.path.join(DATA_BASE_DIR, 'oleform', 'oleform-PR314.docm')
+        parser = VBA_Parser(filename)
+        try:
+            self.assertTrue(parser.detect_vba_macros())
+            pcode = parser.extract_pcode()
+            self.assertIn('QuoteRem', pcode)
+            parser.extract_pcode = lambda: pcode + '\n    QuoteRem 0x0000 0x0005 "Shell"\n'
+
+            pcode_findings = parser.analyze_macros_by_source()['pcode']
+
+            self.assertNotIn(
+                ('Suspicious', 'Shell', 'May run an executable file or a system command'),
+                pcode_findings,
+            )
+        finally:
+            parser.close()
+
 
 if __name__ == '__main__':
     unittest.main()

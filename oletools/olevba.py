@@ -3790,7 +3790,11 @@ class VBA_Parser(object):
         findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
 
         pcode = self.extract_pcode() or ''
-        pcode_comments = ''.join("' {}\n".format(line) for line in pcode.splitlines())
+        pcode_comments = ''.join(
+            "' {}\n".format(line)
+            for line in pcode.splitlines()
+            if not re.match(r'^\s*QuoteRem\b', line, re.IGNORECASE)
+        )
         pcode_scanner = VBA_Scanner(pcode_comments, skip_comments=False)
         findings['pcode'] = pcode_scanner.scan(show_decoded_strings, deobfuscate)
 
