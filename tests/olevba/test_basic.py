@@ -8,7 +8,10 @@ from os.path import join, splitext
 import re
 import json
 
-from oletools.olevba import VBA_Parser, VBA_Scanner, detect_autoexec, detect_suspicious
+from oletools.olevba import (
+    VBA_Parser, VBA_Scanner, _filter_xlm_only_findings,
+    detect_autoexec, detect_suspicious,
+)
 
 # Directory with test data, independent of current working directory
 from tests.test_utils import DATA_BASE_DIR, call_and_capture
@@ -65,6 +68,76 @@ class TestOlevbaBasic(unittest.TestCase):
             [('Open', 'May open a file')],
         )
         self.assertEqual(detect_suspicious('Binary'), [])
+
+    def test_xlm_dll_findings_require_xlm_macros(self):
+        findings = [
+            ('Suspicious', 'REGISTER', 'May call a DLL using Excel 4 Macros (XLM/XLF)'),
+            ('Suspicious', 'REGISTER', 'May call a DLL using Excel 4 Macros (XLM/XLF) '
+             '(obfuscation: Hex)'),
+            ('Suspicious', 'REGISTER', 'Could contain a function that allows to call a DLL '
+             'using Excel 4 Macros (XLM/XLF)'),
+            ('Suspicious', 'Shell', 'May run an executable file or a system command'),
+        ]
+
+        self.assertEqual(
+            _filter_xlm_only_findings(findings, contains_xlm_macros=False),
+            [findings[-1]],
+        )
+        self.assertEqual(
+            _filter_xlm_only_findings(findings, contains_xlm_macros=True),
+            findings,
+        )
+
+    def test_pcode_dll_indicator_does_not_match_callback(self):
+        source = (
+            'FuncDefn (Declare PtrSafe Function mciSendString Lib "winmm.dll" '
+            '(ByVal lpstrCommand As String, ByVal lpstrReturnString As String, '
+            'ByVal uReturnLength As Long, ByVal hwndCallback As LongPtr) As Long)'
+        )
+
+        self.assertNotIn(
+            'May call a DLL using Excel 4 Macros (XLM/XLF)',
+            [description for _, description in detect_suspicious(source)],
+        )
+
+    def test_pcode_xlm_dll_indicator_requires_xlm_macros(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        try:
+            self.assertTrue(parser.detect_macros())
+            self.assertFalse(parser.contains_xlm_macros)
+
+            parser.extract_pcode = lambda: 'ArgsCall (Call) Example 0x0000'
+            findings = parser.analyze_macros_by_source()
+            self.assertNotIn(
+                'May call a DLL using Excel 4 Macros (XLM/XLF)',
+                [description for _, _, description in findings['pcode']],
+            )
+        finally:
+            parser.close()
+
+    def test_analysis_suppresses_xlm_dll_indicator_without_xlm_macros(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        try:
+            self.assertTrue(parser.detect_macros())
+            self.assertFalse(parser.contains_xlm_macros)
+
+            source = 'Sub Example()\nREGISTER "kernel32", "Foo"\nEnd Sub'
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_all_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.detect_vba_stomping = lambda: False
+
+            findings = parser.analyze_macros()
+            self.assertNotIn(
+                'May call a DLL using Excel 4 Macros (XLM/XLF)',
+                [description for _, _, description in findings],
+            )
+        finally:
+            parser.close()
 
     def test_autoexec_detector_can_include_source_line(self):
         source = 'Private Sub Workbook_Open()\nEnd Sub'

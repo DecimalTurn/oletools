@@ -838,6 +838,25 @@ SUSPICIOUS_KEYWORDS_NOREGEX = {
         ('\b',),
 }
 
+XLM_ONLY_SUSPICIOUS_DESCRIPTIONS = frozenset((
+    'May call a DLL using Excel 4 Macros (XLM/XLF)',
+    'Could contain a function that allows to call a DLL using Excel 4 Macros (XLM/XLF)',
+))
+
+
+def _is_xlm_only_suspicious(description):
+    description = description.split(' (obfuscation:', 1)[0]
+    return description in XLM_ONLY_SUSPICIOUS_DESCRIPTIONS
+
+
+def _filter_xlm_only_findings(findings, contains_xlm_macros):
+    if contains_xlm_macros:
+        return findings
+    return [
+        finding for finding in findings
+        if finding[0] != 'Suspicious' or not _is_xlm_only_suspicious(finding[2])
+    ]
+
 # Regular Expression for a URL:
 # http://en.wikipedia.org/wiki/Uniform_resource_locator
 # http://www.w3.org/Addressing/URL/uri-spec.html
@@ -2262,32 +2281,43 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
             result += (vba_code.count('\n', 0, position) + 1,)
         results.append(result)
 
+    def find_matches(pattern):
+        if include_locations:
+            return pattern.finditer(vba_code)
+        match = pattern.search(vba_code)
+        return (match,) if match else ()
+
     for description, keywords in SUSPICIOUS_KEYWORDS.items():
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must be escaped if it contains special chars such as '\'
             if description == 'May open a file':
-                match = re.search(r'(?im)(?:^[ \t]*|:[ \t]+)(Open)\b', vba_code)
+                pattern = re.compile(r'(?im)(?:^[ \t]*|:[ \t]+)(Open)\b')
             else:
-                match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
-            if match:
+                pattern = re.compile(r'(?i)\b' + re.escape(keyword) + r'\b')
+            for match in find_matches(pattern):
                 found_keyword = match.group(1) if description == 'May open a file' else match.group()
                 append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_REGEX.items():
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must NOT be escaped because it is an actual regex
-            match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
-            if match:
+            pattern = re.compile(r'(?i)\b' + keyword + r'\b')
+            for match in find_matches(pattern):
                 found_keyword = match.group()
                 append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_NOREGEX.items():
         for keyword in keywords:
-            if keyword.lower() in vba_code:
-                # avoid reporting backspace chars out of plain VBA code:
-                if not(keyword=='\b' and obfuscation is not None):
-                    position = vba_code.lower().find(keyword.lower())
-                    append_result(keyword, description, position)
+            # avoid reporting backspace chars out of plain VBA code:
+            if keyword == '\b' and obfuscation is not None:
+                continue
+            if include_locations:
+                matches = re.finditer(re.escape(keyword), vba_code, re.IGNORECASE)
+                for match in matches:
+                    append_result(keyword, description, match.start())
+            elif keyword.lower() in vba_code:
+                position = vba_code.lower().find(keyword.lower())
+                append_result(keyword, description, position)
     return results
 
 
@@ -3755,6 +3785,15 @@ class VBA_Parser(object):
                 analysis_code += form_string + '\n'
             scanner = VBA_Scanner(analysis_code, skip_comments=False)
             self.analysis_results = scanner.scan(show_decoded_strings, deobfuscate)
+            if not self.contains_xlm_macros:
+                scanner.suspicious_keywords = [
+                    finding for finding in scanner.suspicious_keywords
+                    if not _is_xlm_only_suspicious(finding[1])
+                ]
+                scanner.results = _filter_xlm_only_findings(
+                    scanner.results, self.contains_xlm_macros
+                )
+                self.analysis_results = scanner.results
             if self.detect_vba_stomping():
                 log.debug('adding VBA stomping to suspicious keywords')
                 keyword = 'VBA Stomping'
@@ -3805,6 +3844,9 @@ class VBA_Parser(object):
             source_code += form_string + '\n'
         source_scanner = VBA_Scanner(source_code, skip_comments=False)
         findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
+        findings['vba_source'] = _filter_xlm_only_findings(
+            findings['vba_source'], self.contains_xlm_macros
+        )
 
         source_finding_set = set(findings['vba_source'])
         located_findings = set()
@@ -3817,6 +3859,8 @@ class VBA_Parser(object):
                     ('Suspicious', detect_suspicious)):
                 for keyword, description, line_number in detector(
                         module_code, include_locations=True):
+                    if not self.contains_xlm_macros and _is_xlm_only_suspicious(description):
+                        continue
                     finding = (finding_type, keyword, description)
                     signature = (finding_type, keyword.casefold(), description.casefold())
                     if finding not in source_finding_set or signature in located_findings:
@@ -3838,7 +3882,10 @@ class VBA_Parser(object):
             if not re.match(r'^\s*QuoteRem\b', line, re.IGNORECASE)
         )
         pcode_scanner = VBA_Scanner(pcode_comments, skip_comments=False)
-        findings['pcode'] = pcode_scanner.scan(show_decoded_strings, deobfuscate)
+        findings['pcode'] = _filter_xlm_only_findings(
+            pcode_scanner.scan(show_decoded_strings, deobfuscate),
+            self.contains_xlm_macros,
+        )
 
         if self.template_injection_found:
             findings['vba_source'].append((
