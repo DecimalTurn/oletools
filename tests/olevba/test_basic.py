@@ -10,8 +10,8 @@ import json
 
 from oletools.olevba import (
     VBA_Parser, VBA_Scanner, _filter_xlm_only_findings,
-    detect_autoexec, detect_hex_strings, detect_hex_strings_with_locations,
-    detect_suspicious,
+    detect_autoexec, detect_base64_strings, detect_hex_strings,
+    detect_hex_strings_with_locations, detect_suspicious,
 )
 
 # Directory with test data, independent of current working directory
@@ -197,6 +197,12 @@ class TestOlevbaBasic(unittest.TestCase):
             detect_hex_strings_with_locations(source),
             [('41424344', 'ABCD', 3)],
         )
+
+    def test_base64_detector_ignores_misc_label(self):
+        for value in ('MISC', 'misc', 'vKey', 'hwndCallback', 'Gold'):
+            with self.subTest(value=value):
+                self.assertEqual(detect_base64_strings(f'value = "{value}"'), [])
+        self.assertEqual(detect_base64_strings('payload = "TWFu"'), [('TWFu', 'Man')])
 
     def test_hex_strings_ignore_vba_attribute_metadata(self):
         source = (

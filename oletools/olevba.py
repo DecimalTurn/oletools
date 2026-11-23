@@ -912,7 +912,7 @@ BASE64_RE = r'(?:[A-Za-z0-9+/]{4}){1,}(?:[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-
 re_base64_string = re.compile('"' + BASE64_RE + '"')
 # white list of common strings matching the base64 regex, but which are not base64 strings (all lowercase):
 BASE64_WHITELIST = set(['thisdocument', 'thisworkbook', 'test', 'temp', 'http', 'open', 'exit', 'kernel32',
-                        'virtualalloc', 'createthread'])
+                        'virtualalloc', 'createthread', 'misc', 'vkey', 'hwndcallback', 'gold'])
 
 # regex to detect strings encoded with a specific Dridex algorithm
 # (see https://github.com/JamesHabben/MalwareStuff)
