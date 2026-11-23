@@ -56,6 +56,24 @@ class TestOlevbaBasic(unittest.TestCase):
         self.assertFalse(has_open_indicator('Set workbook = Workbooks.Open(filePath)'))
         self.assertFalse(has_open_indicator('openFile = "safe"'))
 
+    def test_run_indicator_requires_application_or_statement_position(self):
+        def has_run_indicator(source):
+            return any(
+                description == 'May run an executable file or a system command'
+                for _, description in detect_suspicious(source)
+            )
+
+        self.assertTrue(has_run_indicator('Application.Run "MacroName"'))
+        self.assertTrue(has_run_indicator('result = Application.Run("MacroName")'))
+        self.assertTrue(has_run_indicator('Dim AnyValue As Application\nAnyValue.Run "MacroName"'))
+        self.assertTrue(has_run_indicator('DVZ.Run "MacroName"'))
+        self.assertTrue(has_run_indicator('Run "MacroName"'))
+        self.assertTrue(has_run_indicator('Call Run("MacroName")'))
+        self.assertTrue(has_run_indicator('If ready Then: Run "MacroName"'))
+        self.assertTrue(has_run_indicator('If ready Then Debug.Print "safe" Else Run "MacroName"'))
+        self.assertFalse(has_run_indicator('Private Sub Run()\nEnd Sub'))
+        self.assertFalse(has_run_indicator('RunMode = "safe"'))
+
     def test_suspicious_detector_can_include_source_line(self):
         source = 'Private Sub Workbook_Open()\nEnd Sub\nOpen filePath For Input'
 

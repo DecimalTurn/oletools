@@ -2214,12 +2214,24 @@ def _remove_vba_comments(vba_code):
     return '\n'.join(filtered_lines)
 
 
-VBA_PRE_STATEMENT = r'(?im)(?:^[ \t]*|:[ \t]*|(?:Then|Else)[ \t]+)'
+VBA_PRE_STATEMENT = r'(?:^[ \t]*|:[ \t]*|(?:Then|Else)[ \t]+)'
 
 
 def _compile_pre_statement_pattern(statement):
     """Compile a pattern for a VBA statement, not a member/name reference."""
-    return re.compile(VBA_PRE_STATEMENT + r'(' + re.escape(statement) + r')\b')
+    return re.compile(
+        VBA_PRE_STATEMENT + r'(' + re.escape(statement) + r')\b',
+        re.IGNORECASE | re.MULTILINE,
+    )
+
+
+def _compile_run_pattern():
+    """Compile a pattern for a qualified or implicit Run call."""
+    return re.compile(
+        r'(?:\.\s*(Run)\b|'
+        + VBA_PRE_STATEMENT + r'(?:Call[ \t]+)?(Run)\b)',
+        re.IGNORECASE | re.MULTILINE,
+    )
 
 
 def detect_autoexec(vba_code, obfuscation=None, include_locations=False):
@@ -2303,10 +2315,17 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
             # note: each keyword must be escaped if it contains special chars such as '\'
             if description == 'May open a file':
                 pattern = _compile_pre_statement_pattern(keyword)
+            elif description == 'May run an executable file or a system command' and keyword == 'Run':
+                pattern = _compile_run_pattern()
             else:
                 pattern = re.compile(r'(?i)\b' + re.escape(keyword) + r'\b')
             for match in find_matches(pattern):
-                found_keyword = match.group(1) if description == 'May open a file' else match.group()
+                if description == 'May open a file':
+                    found_keyword = match.group(1)
+                elif description == 'May run an executable file or a system command' and keyword == 'Run':
+                    found_keyword = match.group(1) or match.group(2)
+                else:
+                    found_keyword = match.group()
                 append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_REGEX.items():
         for keyword in keywords:
