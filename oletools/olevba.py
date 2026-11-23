@@ -2372,6 +2372,13 @@ def detect_patterns(vba_code, obfuscation=None, include_locations=False):
                     exclude_pattern_found = True
             if exclude_pattern_found:
                 continue
+            if pattern_type == 'Executable file name' and value.lower().endswith('.dll'):
+                line_start = vba_code.rfind('\n', 0, match.start()) + 1
+                line_end = vba_code.find('\n', match.end())
+                if line_end < 0:
+                    line_end = len(vba_code)
+                if re.search(r'\bLib\b', vba_code[line_start:line_end], re.IGNORECASE):
+                    continue
             if include_locations:
                 line_number = vba_code.count('\n', 0, match.start()) + 1
                 results.append((pattern_type + obf_text, value, line_number))

@@ -329,6 +329,21 @@ class TestOlevbaBasic(unittest.TestCase):
         finally:
             parser.close()
 
+    def test_dll_ioc_is_suppressed_on_lib_declaration_line(self):
+        source = (
+            'Declare Function NativeCall Lib "kernel32.dll" () As Long\n'
+            'Shell "dropper.dll"'
+        )
+
+        self.assertEqual(
+            detect_patterns(source),
+            [('Executable file name', 'dropper.dll')],
+        )
+        self.assertEqual(
+            detect_patterns(source, include_locations=True),
+            [('Executable file name', 'dropper.dll', 2)],
+        )
+
     def test_text_behaviour(self):
         """Test behaviour of olevba when presented with pure text file."""
         self.do_test_behaviour('text')
