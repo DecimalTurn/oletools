@@ -164,6 +164,40 @@ class TestOlevbaBasic(unittest.TestCase):
             [('41424344', 'ABCD', 2)],
         )
 
+    def test_hex_strings_support_doubled_quotes_inside_literals(self):
+        source = 'payload = "prefix ""41424344"" suffix"'
+
+        self.assertEqual(detect_hex_strings(source), [('41424344', 'ABCD')])
+        self.assertEqual(
+            detect_hex_strings_with_locations(source),
+            [('41424344', 'ABCD', 1)],
+        )
+
+    def test_hex_strings_remain_separate_across_doubled_quotes(self):
+        source = 'payload = "41424344""4a4b4c4d"'
+
+        self.assertEqual(
+            detect_hex_strings(source),
+            [('41424344', 'ABCD'), ('4a4b4c4d', 'JKLM')],
+        )
+
+    def test_hex_strings_are_detected_in_adjacent_literals(self):
+        source = 'payload = "41424344" & "4a4b4c4d"'
+
+        self.assertEqual(
+            detect_hex_strings(source),
+            [('41424344', 'ABCD'), ('4a4b4c4d', 'JKLM')],
+        )
+
+    def test_hex_strings_ignore_empty_and_unterminated_literals(self):
+        source = 'empty = """"\nunclosed = "not closed\npayload = "41424344"'
+
+        self.assertEqual(detect_hex_strings(source), [('41424344', 'ABCD')])
+        self.assertEqual(
+            detect_hex_strings_with_locations(source),
+            [('41424344', 'ABCD', 3)],
+        )
+
     def test_hex_strings_ignore_vba_attribute_metadata(self):
         source = (
             'Attribute VB_Name = "ЭтаКнига"\n'
