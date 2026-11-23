@@ -2214,6 +2214,14 @@ def _remove_vba_comments(vba_code):
     return '\n'.join(filtered_lines)
 
 
+VBA_PRE_STATEMENT = r'(?im)(?:^[ \t]*|:[ \t]*|(?:Then|Else)[ \t]+)'
+
+
+def _compile_pre_statement_pattern(statement):
+    """Compile a pattern for a VBA statement, not a member/name reference."""
+    return re.compile(VBA_PRE_STATEMENT + r'(' + re.escape(statement) + r')\b')
+
+
 def detect_autoexec(vba_code, obfuscation=None, include_locations=False):
     """
     Detect if the VBA code contains keywords corresponding to macros running
@@ -2294,7 +2302,7 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
             # search using regex to detect word boundaries:
             # note: each keyword must be escaped if it contains special chars such as '\'
             if description == 'May open a file':
-                pattern = re.compile(r'(?im)(?:^[ \t]*|:[ \t]+)(Open)\b')
+                pattern = _compile_pre_statement_pattern(keyword)
             else:
                 pattern = re.compile(r'(?i)\b' + re.escape(keyword) + r'\b')
             for match in find_matches(pattern):

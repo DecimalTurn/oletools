@@ -49,9 +49,12 @@ class TestOlevbaBasic(unittest.TestCase):
 
         self.assertTrue(has_open_indicator('  Open filePath For Input As #1'))
         self.assertTrue(has_open_indicator('If ready Then: Open filePath For Input As #1'))
+        self.assertTrue(has_open_indicator('If ready Then:Open filePath For Input As #1'))
+        self.assertTrue(has_open_indicator('If ready Then Open filePath For Input As #1'))
+        self.assertTrue(has_open_indicator('If ready Then Debug.Print "safe" Else Open filePath'))
         self.assertFalse(has_open_indicator('Private Sub Workbook_Open()\nEnd Sub'))
         self.assertFalse(has_open_indicator('Set workbook = Workbooks.Open(filePath)'))
-        self.assertFalse(has_open_indicator('If ready Then:Open filePath For Input As #1'))
+        self.assertFalse(has_open_indicator('openFile = "safe"'))
 
     def test_suspicious_detector_can_include_source_line(self):
         source = 'Private Sub Workbook_Open()\nEnd Sub\nOpen filePath For Input'
