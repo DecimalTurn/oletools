@@ -2350,7 +2350,7 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
     return results
 
 
-def detect_patterns(vba_code, obfuscation=None):
+def detect_patterns(vba_code, obfuscation=None, include_locations=False):
     """
     Detect if the VBA code contains specific patterns such as IP addresses,
     URLs, e-mail addresses, executable file names, etc.
@@ -2370,7 +2370,12 @@ def detect_patterns(vba_code, obfuscation=None):
             for url_exclude_pattern in EXCLUDE_URLS_PATTERNS:
                 if value.startswith(url_exclude_pattern):
                     exclude_pattern_found = True
-            if value not in found and not exclude_pattern_found:
+            if exclude_pattern_found:
+                continue
+            if include_locations:
+                line_number = vba_code.count('\n', 0, match.start()) + 1
+                results.append((pattern_type + obf_text, value, line_number))
+            elif value not in found:
                 results.append((pattern_type + obf_text, value))
                 found.add(value)
     return results
@@ -3922,6 +3927,21 @@ class VBA_Parser(object):
                         'module_name': vba_filename,
                         'line_number': line_number,
                     })
+            for pattern_type, value, line_number in detect_patterns(
+                    module_code, include_locations=True):
+                finding = ('IOC', value, pattern_type)
+                signature = ('IOC', value.casefold(), pattern_type.casefold(), module_index, line_number)
+                if finding not in source_finding_set or signature in located_findings:
+                    continue
+                located_findings.add(signature)
+                findings['vba_source_locations'].append({
+                    'type': 'IOC',
+                    'keyword': value,
+                    'description': pattern_type,
+                    'module_index': module_index,
+                    'module_name': vba_filename,
+                    'line_number': line_number,
+                })
             for encoded, decoded, line_number in detect_hex_strings_with_locations(module_code):
                 finding = ('Hex String', decoded, encoded)
                 signature = ('Hex String', decoded.casefold(), encoded.casefold())

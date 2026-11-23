@@ -11,7 +11,7 @@ import json
 from oletools.olevba import (
     VBA_Parser, VBA_Scanner, _filter_xlm_only_findings,
     detect_autoexec, detect_base64_strings, detect_hex_strings,
-    detect_hex_strings_with_locations, detect_suspicious,
+    detect_hex_strings_with_locations, detect_patterns, detect_suspicious,
 )
 
 # Directory with test data, independent of current working directory
@@ -298,6 +298,32 @@ class TestOlevbaBasic(unittest.TestCase):
             self.assertEqual(
                 [location['line_number'] for location in findings['vba_source_locations']
                  if location['type'] == 'Suspicious' and location['keyword'] == 'Lib'],
+                [1, 2],
+            )
+        finally:
+            parser.close()
+
+    def test_ioc_finding_includes_each_vba_source_location(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = 'Shell "dropper.exe"\nShell "dropper.exe"'
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: ''
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertIn(
+                ('IOC', 'dropper.exe', 'Executable file name'),
+                findings['vba_source'],
+            )
+            self.assertEqual(
+                [location['line_number'] for location in findings['vba_source_locations']
+                 if location['type'] == 'IOC' and location['keyword'] == 'dropper.exe'],
                 [1, 2],
             )
         finally:
