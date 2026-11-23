@@ -899,7 +899,9 @@ RE_PATTERNS = (
     #('Hex string', re.compile(r'(?:[0-9A-Fa-f]{2}){4,}')),
 )
 
-# regex to detect strings encoded in hexadecimal
+# regexes to detect hexadecimal strings inside VBA string literals
+re_vba_string = re.compile(r'"((?:[^"\r\n]|"")*)"')
+re_vba_attribute = re.compile(r'^\s*Attribute\b', re.IGNORECASE | re.MULTILINE)
 re_hex_string = re.compile(r'(?:[0-9A-Fa-f]{2}){4,}')
 
 # regex to detect strings encoded in base64
@@ -2354,14 +2356,27 @@ def detect_hex_strings(vba_code):
     :param vba_code: str, VBA source code
     :return: list of str tuples (encoded string, decoded string)
     """
+    return [
+        (encoded, decoded)
+        for encoded, decoded, _ in detect_hex_strings_with_locations(vba_code)
+    ]
+
+
+def detect_hex_strings_with_locations(vba_code):
+    """Return encoded strings, decoded values, and their source line numbers."""
     results = []
     found = set()
-    for match in re_hex_string.finditer(vba_code):
-        value = match.group()
-        if value not in found:
-            decoded = bytes2str(binascii.unhexlify(value))
-            results.append((value, decoded))
-            found.add(value)
+    for string_match in re_vba_string.finditer(vba_code):
+        line_start = vba_code.rfind('\n', 0, string_match.start()) + 1
+        if re_vba_attribute.match(vba_code[line_start:string_match.start()]):
+            continue
+        for match in re_hex_string.finditer(string_match.group(1)):
+            value = match.group()
+            if value not in found:
+                decoded = bytes2str(binascii.unhexlify(value))
+                line_number = vba_code.count('\n', 0, string_match.start()) + 1
+                results.append((value, decoded, line_number))
+                found.add(value)
     return results
 
 
@@ -3844,6 +3859,10 @@ class VBA_Parser(object):
             source_code += form_string + '\n'
         source_scanner = VBA_Scanner(source_code, skip_comments=False)
         findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
+        for encoded, decoded in source_scanner.hex_strings:
+            finding = ('Hex String', decoded, encoded)
+            if finding not in findings['vba_source']:
+                findings['vba_source'].append(finding)
         findings['vba_source'] = _filter_xlm_only_findings(
             findings['vba_source'], self.contains_xlm_macros
         )
@@ -3874,6 +3893,20 @@ class VBA_Parser(object):
                         'module_name': vba_filename,
                         'line_number': line_number,
                     })
+            for encoded, decoded, line_number in detect_hex_strings_with_locations(module_code):
+                finding = ('Hex String', decoded, encoded)
+                signature = ('Hex String', decoded.casefold(), encoded.casefold())
+                if finding not in source_finding_set or signature in located_findings:
+                    continue
+                located_findings.add(signature)
+                findings['vba_source_locations'].append({
+                    'type': 'Hex String',
+                    'keyword': decoded,
+                    'description': encoded,
+                    'module_index': module_index,
+                    'module_name': vba_filename,
+                    'line_number': line_number,
+                })
 
         pcode = self.extract_pcode() or ''
         pcode_comments = ''.join(
@@ -3886,6 +3919,10 @@ class VBA_Parser(object):
             pcode_scanner.scan(show_decoded_strings, deobfuscate),
             self.contains_xlm_macros,
         )
+        for encoded, decoded in pcode_scanner.hex_strings:
+            finding = ('Hex String', decoded, encoded)
+            if finding not in findings['pcode']:
+                findings['pcode'].append(finding)
 
         if self.template_injection_found:
             findings['vba_source'].append((

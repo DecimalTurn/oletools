@@ -10,7 +10,8 @@ import json
 
 from oletools.olevba import (
     VBA_Parser, VBA_Scanner, _filter_xlm_only_findings,
-    detect_autoexec, detect_suspicious,
+    detect_autoexec, detect_hex_strings, detect_hex_strings_with_locations,
+    detect_suspicious,
 )
 
 # Directory with test data, independent of current working directory
@@ -150,6 +151,68 @@ class TestOlevbaBasic(unittest.TestCase):
             detect_autoexec(source),
             [('Workbook_Open', 'Runs when the Excel Workbook is opened')],
         )
+
+    def test_hex_strings_are_detected_only_inside_string_literals(self):
+        source = 'If value > 2147483647 Then\nencoded = "41424344"'
+
+        self.assertEqual(detect_hex_strings(source), [('41424344', 'ABCD')])
+        self.assertEqual(
+            detect_hex_strings_with_locations(source),
+            [('41424344', 'ABCD', 2)],
+        )
+
+    def test_hex_strings_ignore_vba_attribute_metadata(self):
+        source = (
+            'Attribute VB_Name = "ЭтаКнига"\n'
+            'Attribute VB_Base = "0{00020819-0000-0000-C000-000000000046}"\n'
+            'Attribute VB_GlobalNameSpace = False\n'
+            'Attribute VB_Creatable = False\n'
+            'payload = "00020819"'
+        )
+
+        self.assertEqual(detect_hex_strings(source), [('00020819', '\x00\x02\x08\x19')])
+        self.assertEqual(
+            detect_hex_strings_with_locations(source),
+            [('00020819', '\x00\x02\x08\x19', 5)],
+        )
+
+    def test_hex_string_finding_includes_vba_source_location(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = (
+            'Sub Example()\nvalue = 2147483647\n'
+            'encoded = "41424344"\nmetadata = "00020819"\nEnd Sub'
+        )
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: ''
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertIn(('Hex String', 'ABCD', '41424344'), findings['vba_source'])
+            self.assertIn({
+                'type': 'Hex String',
+                'keyword': 'ABCD',
+                'description': '41424344',
+                'module_index': 0,
+                'module_name': 'Module1',
+                'line_number': 3,
+            }, findings['vba_source_locations'])
+            self.assertIn(('Hex String', '\x00\x02\x08\x19', '00020819'), findings['vba_source'])
+            self.assertIn({
+                'type': 'Hex String',
+                'keyword': '\x00\x02\x08\x19',
+                'description': '00020819',
+                'module_index': 0,
+                'module_name': 'Module1',
+                'line_number': 4,
+            }, findings['vba_source_locations'])
+        finally:
+            parser.close()
 
     def test_text_behaviour(self):
         """Test behaviour of olevba when presented with pure text file."""
