@@ -73,6 +73,9 @@ class TestOlevbaBasic(unittest.TestCase):
         self.assertTrue(has_run_indicator('If ready Then Debug.Print "safe" Else Run "MacroName"'))
         self.assertFalse(has_run_indicator('Private Sub Run()\nEnd Sub'))
         self.assertFalse(has_run_indicator('RunMode = "safe"'))
+        self.assertFalse(has_run_indicator(
+            'Call PrintString("crotch: z    run: +shift", 5, 29, RED, SHADOW, FATSHADOW_BOTTOM)'
+        ))
 
     def test_suspicious_detector_can_include_source_line(self):
         source = 'Private Sub Workbook_Open()\nEnd Sub\nOpen filePath For Input'
