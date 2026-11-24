@@ -911,6 +911,10 @@ re_hex_string = re.compile(r'(?:[0-9A-Fa-f]{2}){4,}')
 BASE64_RE = r'(?:[A-Za-z0-9+/]{4}){1,}(?:[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)?'
 re_base64_string = re.compile('"' + BASE64_RE + '"')
 re_vba_cell_reference = re.compile(r'(?i)^\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})$')
+re_vba_range_definition = re.compile(
+    r'(?im)^\s*(?:(?:Public|Private|Friend|Static|Default|Global)\s+)*'
+    r'(?:Sub|Function|Property\s+(?:Get|Let|Set)|Declare(?:\s+(?:PtrSafe|Ansi|Unicode))?\s+Function)\s+Range\b'
+)
 # white list of common strings matching the base64 regex, but which are not base64 strings (all lowercase):
 BASE64_WHITELIST = set(['thisdocument', 'thisworkbook', 'test', 'temp', 'http', 'open', 'exit', 'kernel32',
                         'virtualalloc', 'createthread', 'misc', 'vkey', 'hwndcallback', 'gold'])
@@ -2420,35 +2424,120 @@ def detect_hex_strings_with_locations(vba_code):
     return results
 
 
-def detect_base64_strings(vba_code):
+def detect_base64_strings(vba_code, has_custom_range_definition=None):
     """
     Detect if the VBA code contains strings encoded in base64.
 
     :param vba_code: str, VBA source code
     :return: list of str tuples (encoded string, decoded string)
     """
-    #TODO: avoid matching simple hex strings as base64?
     results = []
     found = set()
+    for value, decoded, _ in detect_base64_strings_with_locations(
+            vba_code, has_custom_range_definition):
+        if value not in found:
+            results.append((value, decoded))
+            found.add(value)
+    return results
+
+
+def detect_base64_strings_with_locations(vba_code, has_custom_range_definition=None):
+    """Return detected Base64 strings with their source line numbers."""
+    if has_custom_range_definition is None:
+        has_custom_range_definition = _has_vba_range_definition(vba_code)
+    results = []
     for match in re_base64_string.finditer(vba_code):
         # extract the base64 string without quotes:
         value = match.group().strip('"')
         line_start = vba_code.rfind('\n', 0, match.start()) + 1
         if re_vba_attribute.match(vba_code[line_start:match.start()]):
             continue
+        if not has_custom_range_definition and (
+            _is_builtin_excel_range_reference(vba_code, match, value)
+            or _is_pcode_builtin_excel_range_reference(vba_code, match, value)):
+            continue
         # check it is not just a hex string:
         if not re_nothex_check.search(value):
             continue
-        # only keep new values and not in the whitelist:
-        if value not in found and value.lower() not in BASE64_WHITELIST:
+        if value.lower() not in BASE64_WHITELIST:
             try:
                 decoded = bytes2str(base64.b64decode(value))
-                results.append((value, decoded))
-                found.add(value)
+                line_number = vba_code.count('\n', 0, match.start()) + 1
+                results.append((value, decoded, line_number))
             except (TypeError, ValueError) as exc:
                 log.debug('Failed to base64-decode (%s)' % exc)
                 # if an exception occurs, it is likely not a base64-encoded string
     return results
+
+
+def _has_vba_range_definition(vba_code):
+    return re_vba_range_definition.search(vba_code) is not None
+
+
+def _is_builtin_excel_range_reference(vba_code, string_match, value):
+    reference = re_vba_cell_reference.match(value)
+    if not reference:
+        return False
+    column_number = 0
+    for column_letter in reference.group(1).upper():
+        column_number = column_number * 26 + ord(column_letter) - ord('A') + 1
+    if column_number > 16384 or int(reference.group(2)) > 1048576:
+        return False
+
+    suffix = vba_code[string_match.end():]
+    return (
+        _is_direct_range_argument(vba_code, string_match.start())
+        and re.match(r'\s*(?:\)|,)', suffix) is not None
+    )
+
+
+def _is_pcode_builtin_excel_range_reference(vba_code, string_match, value):
+    if not re_vba_cell_reference.match(value):
+        return False
+    line_start = vba_code.rfind('\n', 0, string_match.start()) + 1
+    line_end = vba_code.find('\n', string_match.end())
+    if line_end < 0:
+        line_end = len(vba_code)
+    current_line = vba_code[line_start:line_end]
+    current_line = re.sub(r'^\s*\'\s*', '', current_line)
+    if not re.match(r'LitStr\s+(?:0x[0-9A-Fa-f]+\s+)?"', current_line):
+        return False
+    for next_line in vba_code[line_end + 1:].splitlines():
+        next_line = re.sub(r'^\s*\'\s*', '', next_line)
+        if not next_line.strip() or re.match(r'Line #\d+:', next_line):
+            continue
+        return re.match(r'ArgsMem(?:Ld|St|Call)(?:With)?\s+Range\b', next_line) is not None
+    return False
+
+
+def _is_direct_range_argument(vba_code, string_start):
+    for call_match in re.finditer(r'(?i)\bRange\s*\(', vba_code[:string_start]):
+        argument_start = call_match.end()
+        parenthesis_depth = 1
+        in_string = False
+        index = argument_start
+        while index < string_start:
+            character = vba_code[index]
+            if in_string:
+                if character == '"':
+                    if index + 1 < string_start and vba_code[index + 1] == '"':
+                        index += 2
+                        continue
+                    in_string = False
+            elif character == '"':
+                in_string = True
+            elif character == '(':
+                parenthesis_depth += 1
+            elif character == ')':
+                parenthesis_depth -= 1
+                if parenthesis_depth == 0:
+                    break
+            elif character == ',' and parenthesis_depth == 1:
+                argument_start = index + 1
+            index += 1
+        if parenthesis_depth > 0 and not vba_code[argument_start:string_start].strip():
+            return True
+    return False
 
 # DridexUrlDecode written by James Habben
 # Originally published on https://github.com/JamesHabben/MalwareStuff
@@ -2647,7 +2736,7 @@ class VBA_Scanner(object):
     suspicious keywords, IOCs, auto-executable macros, etc.
     """
 
-    def __init__(self, vba_code, skip_comments=True):
+    def __init__(self, vba_code, skip_comments=True, has_custom_range_definition=None):
         """
         VBA_Scanner constructor
 
@@ -2658,6 +2747,7 @@ class VBA_Scanner(object):
         self.code = vba_collapse_long_lines(vba_code)
         if skip_comments:
             self.code = _remove_vba_comments(self.code)
+        self.has_custom_range_definition = has_custom_range_definition
         self.code_hex = ''
         self.code_hex_rev = ''
         self.code_rev_hex = ''
@@ -2704,7 +2794,7 @@ class VBA_Scanner(object):
                 #example: https://malwr.com/analysis/NmFlMGI4YTY1YzYyNDkwNTg1ZTBiZmY5OGI3YjlhYzU/
         #TODO: also append the full code reversed if StrReverse? (risk of false positives?)
         # Detect Base64-encoded strings
-        self.base64_strings = detect_base64_strings(self.code)
+        self.base64_strings = detect_base64_strings(self.code, self.has_custom_range_definition)
         for encoded, decoded in self.base64_strings:
             self.code_base64 += '\n' + decoded
         # Detect Dridex-encoded strings
@@ -3841,7 +3931,14 @@ class VBA_Parser(object):
             analysis_code = '\n'.join(analysis_modules)
             for (_, _, form_string) in self.extract_form_strings():
                 analysis_code += form_string + '\n'
-            scanner = VBA_Scanner(analysis_code, skip_comments=False)
+            range_source_code = _remove_vba_comments(self.get_vba_code_all_modules(
+                include_pcode=False, include_xlm=False
+            ))
+            scanner = VBA_Scanner(
+                analysis_code,
+                skip_comments=False,
+                has_custom_range_definition=_has_vba_range_definition(range_source_code),
+            )
             self.analysis_results = scanner.scan(show_decoded_strings, deobfuscate)
             if not self.contains_xlm_macros:
                 scanner.suspicious_keywords = [
@@ -3900,7 +3997,12 @@ class VBA_Parser(object):
         )
         for (_, _, form_string) in self.extract_form_strings():
             source_code += form_string + '\n'
-        source_scanner = VBA_Scanner(source_code, skip_comments=False)
+        has_custom_range_definition = _has_vba_range_definition(source_code)
+        source_scanner = VBA_Scanner(
+            source_code,
+            skip_comments=False,
+            has_custom_range_definition=has_custom_range_definition,
+        )
         findings['vba_source'] = source_scanner.scan(show_decoded_strings, deobfuscate)
         for encoded, decoded in source_scanner.hex_strings:
             finding = ('Hex String', decoded, encoded)
@@ -3967,6 +4069,32 @@ class VBA_Parser(object):
                     'module_name': vba_filename,
                     'line_number': line_number,
                 })
+            base64_finding = next((
+                finding for finding in source_finding_set
+                if finding[0] == 'Suspicious' and finding[1].casefold() == 'base64 strings'
+            ), None)
+            if base64_finding:
+                _, keyword, description = base64_finding
+                located_lines = set()
+                for _, _, line_number in detect_base64_strings_with_locations(
+                    module_code, has_custom_range_definition):
+                    if line_number in located_lines:
+                        continue
+                    located_lines.add(line_number)
+                    signature = (
+                        'Suspicious', keyword.casefold(), description.casefold(), module_index, line_number
+                    )
+                    if signature in located_findings:
+                        continue
+                    located_findings.add(signature)
+                    findings['vba_source_locations'].append({
+                        'type': 'Suspicious',
+                        'keyword': keyword,
+                        'description': description,
+                        'module_index': module_index,
+                        'module_name': vba_filename,
+                        'line_number': line_number,
+                    })
 
         pcode = self.extract_pcode() or ''
         pcode_comments = ''.join(
@@ -3974,7 +4102,11 @@ class VBA_Parser(object):
             for line in pcode.splitlines()
             if not re.match(r'^\s*QuoteRem\b', line, re.IGNORECASE)
         )
-        pcode_scanner = VBA_Scanner(pcode_comments, skip_comments=False)
+        pcode_scanner = VBA_Scanner(
+            pcode_comments,
+            skip_comments=False,
+            has_custom_range_definition=has_custom_range_definition,
+        )
         findings['pcode'] = _filter_xlm_only_findings(
             pcode_scanner.scan(show_decoded_strings, deobfuscate),
             self.contains_xlm_macros,

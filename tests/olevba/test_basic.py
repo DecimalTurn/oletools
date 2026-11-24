@@ -225,23 +225,30 @@ class TestOlevbaBasic(unittest.TestCase):
                 self.assertEqual(detect_base64_strings(f'value = "{value}"'), [])
         self.assertEqual(detect_base64_strings('payload = "TWFu"'), [('TWFu', 'Man')])
 
-    def test_base64_detector_ignores_attributes_but_keeps_excel_cell_references(self):
+    def test_base64_detector_ignores_builtin_range_references_but_keeps_other_candidates(self):
         source = (
             'Attribute VB_Name = "Movement"\n'
-            'Range("AG10") : Range("AG11") : Range("AG12")\n'
-            'Range("AG13") : Range("AG14") : Range("AG15")\n'
-            'Range("AL18") : Range("AL19") : Range("AL20") : Range("AL21")\n'
+            'Range("AG10", "AL21")\n'
             'P-code references: "AG10" "AL21"\n'
-            'payload = "TWFu"'
+            'payload = "TWFu"\n'
+            'outside_range = "AG10"\n'
+            'outside_excel_limits = Range("XFE1")'
         )
 
         self.assertEqual(
             [value for value, _ in detect_base64_strings(source)],
-            [
-                'AG10', 'AG11', 'AG12', 'AG13', 'AG14', 'AG15',
-                'AL18', 'AL19', 'AL20', 'AL21', 'TWFu',
-            ],
+            ['AG10', 'AL21', 'TWFu', 'XFE1'],
         )
+
+    def test_base64_detector_does_not_exempt_range_when_custom_procedure_exists(self):
+        for definition in (
+            'Public Sub Range(address As String)\nEnd Sub\n',
+            'Public Function Range(address As String) As String\nEnd Function\n',
+            'Public Property Get Range() As String\nEnd Property\n',
+        ):
+            with self.subTest(definition=definition.splitlines()[0]):
+                source = definition + 'value = Range("AG10")'
+                self.assertEqual(detect_base64_strings(source), [('AG10', '\x00mt')])
 
     def test_hex_strings_ignore_vba_attribute_metadata(self):
         source = (
@@ -293,6 +300,121 @@ class TestOlevbaBasic(unittest.TestCase):
                 'module_name': 'Module1',
                 'line_number': 4,
             }, findings['vba_source_locations'])
+        finally:
+            parser.close()
+
+    def test_base64_finding_includes_each_vba_source_location(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = 'payload = "TWFu"\nsecond = "TWFu"\nthird = "QUJD"'
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: ''
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertIn(
+                (
+                    'Suspicious',
+                    'Base64 Strings',
+                    'Base64-encoded strings were detected, may be used to obfuscate strings '
+                    '(option --decode to see all)',
+                ),
+                findings['vba_source'],
+            )
+            self.assertEqual(
+                [
+                    location['line_number']
+                    for location in findings['vba_source_locations']
+                    if location['type'] == 'Suspicious' and location['keyword'] == 'Base64 Strings'
+                ],
+                [1, 2, 3],
+            )
+        finally:
+            parser.close()
+
+    def test_range_definition_in_another_module_disables_range_exception(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        range_call = 'value = Range("AG10")'
+        range_definition = 'Public Function Range(address As String) As String\nEnd Function'
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: range_call + '\n' + range_definition
+            parser.extract_macros = lambda: [
+                ('module1', 'VBA/Module1', 'Module1', range_call),
+                ('module2', 'VBA/Module2', 'Module2', range_definition),
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: 'LitStr 0x0004 "AG10"\nArgsMemLdWith Range 0x0001'
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertTrue(any(
+                finding[0] == 'Suspicious' and finding[1] == 'Base64 Strings'
+                for finding in findings['vba_source']
+            ))
+            self.assertIn(
+                {
+                    'type': 'Suspicious',
+                    'keyword': 'Base64 Strings',
+                    'description': 'Base64-encoded strings were detected, may be used to obfuscate strings '
+                    '(option --decode to see all)',
+                    'module_index': 0,
+                    'module_name': 'Module1',
+                    'line_number': 1,
+                },
+                findings['vba_source_locations'],
+            )
+            self.assertTrue(any(
+                finding[0] == 'Suspicious' and finding[1] == 'Base64 Strings'
+                for finding in findings['pcode']
+            ))
+        finally:
+            parser.close()
+
+    def test_pcode_range_reference_is_exempt_only_when_source_confirms_builtin_range(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = 'value = Range("AG10")'
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: 'LitStr 0x0004 "AG10"\nArgsMemLdWith Range 0x0001'
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertFalse(any(
+                finding[0] == 'Suspicious' and finding[1] == 'Base64 Strings'
+                for finding in findings['vba_source'] + findings['pcode']
+            ))
+        finally:
+            parser.close()
+
+    def test_pcode_standalone_reference_is_not_exempted_by_source_range_call(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = 'value = Range("AG10")'
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: 'LitStr 0x0004 "AG10"\nNop'
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertTrue(any(
+                finding[0] == 'Suspicious' and finding[1] == 'Base64 Strings'
+                for finding in findings['pcode']
+            ))
         finally:
             parser.close()
 
