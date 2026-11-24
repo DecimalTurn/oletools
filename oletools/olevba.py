@@ -910,6 +910,7 @@ re_hex_string = re.compile(r'(?:[0-9A-Fa-f]{2}){4,}')
 # (plain version without double quotes, used also below in quoted_base64_string)
 BASE64_RE = r'(?:[A-Za-z0-9+/]{4}){1,}(?:[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)?'
 re_base64_string = re.compile('"' + BASE64_RE + '"')
+re_vba_cell_reference = re.compile(r'(?i)^\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})$')
 # white list of common strings matching the base64 regex, but which are not base64 strings (all lowercase):
 BASE64_WHITELIST = set(['thisdocument', 'thisworkbook', 'test', 'temp', 'http', 'open', 'exit', 'kernel32',
                         'virtualalloc', 'createthread', 'misc', 'vkey', 'hwndcallback', 'gold'])
@@ -2432,6 +2433,9 @@ def detect_base64_strings(vba_code):
     for match in re_base64_string.finditer(vba_code):
         # extract the base64 string without quotes:
         value = match.group().strip('"')
+        line_start = vba_code.rfind('\n', 0, match.start()) + 1
+        if re_vba_attribute.match(vba_code[line_start:match.start()]):
+            continue
         # check it is not just a hex string:
         if not re_nothex_check.search(value):
             continue

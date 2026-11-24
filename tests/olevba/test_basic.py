@@ -225,6 +225,24 @@ class TestOlevbaBasic(unittest.TestCase):
                 self.assertEqual(detect_base64_strings(f'value = "{value}"'), [])
         self.assertEqual(detect_base64_strings('payload = "TWFu"'), [('TWFu', 'Man')])
 
+    def test_base64_detector_ignores_attributes_but_keeps_excel_cell_references(self):
+        source = (
+            'Attribute VB_Name = "Movement"\n'
+            'Range("AG10") : Range("AG11") : Range("AG12")\n'
+            'Range("AG13") : Range("AG14") : Range("AG15")\n'
+            'Range("AL18") : Range("AL19") : Range("AL20") : Range("AL21")\n'
+            'P-code references: "AG10" "AL21"\n'
+            'payload = "TWFu"'
+        )
+
+        self.assertEqual(
+            [value for value, _ in detect_base64_strings(source)],
+            [
+                'AG10', 'AG11', 'AG12', 'AG13', 'AG14', 'AG15',
+                'AL18', 'AL19', 'AL20', 'AL21', 'TWFu',
+            ],
+        )
+
     def test_hex_strings_ignore_vba_attribute_metadata(self):
         source = (
             'Attribute VB_Name = "ЭтаКнига"\n'
