@@ -4474,6 +4474,47 @@ class VBA_Parser(object):
             # log.debug(self.pcodedmp_output)
         return self.pcodedmp_output
 
+    def _get_stomping_codepage(self):
+        codepages = set()
+        parsers = [self]
+        while parsers:
+            current = parsers.pop()
+            parsers.extend(getattr(current, 'ole_subfiles', []) or [])
+            if current.ole_file is None:
+                continue
+            try:
+                projects = current.find_vba_projects() or []
+            except Exception:
+                return None
+            for vba_root, project_path, dir_path in projects:
+                try:
+                    project = VBA_Project(
+                        current.ole_file, vba_root, project_path, dir_path,
+                        current.relaxed,
+                    )
+                except Exception:
+                    return None
+                codepages.add(project.codepage)
+
+        if len(codepages) == 1:
+            return next(iter(codepages))
+        return None
+
+    @staticmethod
+    def _vba_identifier_casefold(identifier, codepage):
+        # We handled the Turkish casing for codepage 1254 edgecase before casefolding
+        if codepage == 1254:
+            identifier = identifier.replace('I', '\u0131').replace('\u0130', 'i')
+        return identifier.casefold()
+
+    @classmethod
+    def _vba_token_in_source(cls, kind, token, source, codepage=None):
+        if kind == 'identifier':
+            token = cls._vba_identifier_casefold(token, codepage)
+            source = cls._vba_identifier_casefold(source, codepage)
+            return token in source
+        return token in source
+
     def detect_vba_stomping(self):
         """
         Detect VBA stomping, by comparing the keywords present in the P-code and
@@ -4550,9 +4591,11 @@ class VBA_Parser(object):
             log.debug('Keywords extracted from P-code: ' + repr(sorted(keywords)))
             # get all VBA code as one string
             vba_code_all_modules = self.get_vba_code_all_modules(include_pcode=False)
+            codepage = self._get_stomping_codepage()
             self.vba_stomping_items = []
             for kind, keyword in sorted(keywords):
-                if keyword not in vba_code_all_modules:
+                if not self._vba_token_in_source(
+                        kind, keyword, vba_code_all_modules, codepage):
                     log.debug('Keyword {!r} not found in VBA code'.format(keyword))
                     log.debug('VBA STOMPING DETECTED!')
                     self.vba_stomping_items.append({'kind': kind, 'value': keyword})

@@ -7,7 +7,7 @@ from tests.test_utils import DATA_BASE_DIR
 
 class TestVBAStompingDetails(unittest.TestCase):
 
-    def make_parser(self, pcode, source):
+    def make_parser(self, pcode, source, codepage=None):
         parser = VBA_Parser.__new__(VBA_Parser)
         parser.vba_stomping_detected = None
         parser.vba_stomping_items = []
@@ -16,6 +16,7 @@ class TestVBAStompingDetails(unittest.TestCase):
         parser.pcodedmp_output = pcode
         parser.extract_pcode = lambda: pcode
         parser.get_vba_code_all_modules = lambda **kwargs: source
+        parser._get_stomping_codepage = lambda: codepage
         return parser
 
     def test_reports_missing_identifiers_and_string_literals(self):
@@ -38,6 +39,36 @@ class TestVBAStompingDetails(unittest.TestCase):
 
         self.assertFalse(parser.detect_vba_stomping())
         self.assertEqual(parser.vba_stomping_items, [])
+
+    def test_identifier_comparison_ignores_case_but_literal_comparison_does_not(self):
+        parser = self.make_parser(
+            '\tArgsLd Left$ 0x0002\n\tLitStr 0x0006 "Hidden"\n',
+            'Debug.Print left$("hidden", 1)\n',
+        )
+
+        self.assertTrue(parser.detect_vba_stomping())
+        self.assertEqual(parser.vba_stomping_items, [
+            {'kind': 'string literal', 'value': '"Hidden"'},
+        ])
+
+    def test_cp1254_uses_turkic_identifier_casing(self):
+        parser = self.make_parser(
+            '\tArgsLd I 0x0000\n\tArgsLd \u0130 0x0000\n',
+            '\u0131 i\n',
+            codepage=1254,
+        )
+
+        self.assertFalse(parser.detect_vba_stomping())
+        self.assertEqual(parser.vba_stomping_items, [])
+        self.assertFalse(
+            VBA_Parser._vba_token_in_source('identifier', 'I', 'i', 1254)
+        )
+        self.assertTrue(
+            VBA_Parser._vba_token_in_source('identifier', 'I', '\u0131', 1254)
+        )
+        self.assertTrue(
+            VBA_Parser._vba_token_in_source('identifier', '\u0130', 'i', 1254)
+        )
 
     def test_detects_stomping_in_document_fixture_in_app_order(self):
         filename = os.path.join(DATA_BASE_DIR, 'olevba', 'macrofile_stomp.doc')
