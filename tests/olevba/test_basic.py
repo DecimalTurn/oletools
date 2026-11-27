@@ -220,7 +220,7 @@ class TestOlevbaBasic(unittest.TestCase):
         )
 
     def test_base64_detector_ignores_misc_label(self):
-        for value in ('MISC', 'misc', 'vKey', 'hwndCallback', 'Gold'):
+        for value in ('MISC', 'misc', 'vKey', 'hwndCallback', 'Gold', 'dict', 'Dict'):
             with self.subTest(value=value):
                 self.assertEqual(detect_base64_strings(f'value = "{value}"'), [])
         self.assertEqual(detect_base64_strings('payload = "TWFu"'), [('TWFu', 'Man')])

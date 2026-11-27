@@ -916,7 +916,7 @@ re_vba_range_definition = re.compile(
     r'(?:Sub|Function|Property\s+(?:Get|Let|Set)|Declare(?:\s+(?:PtrSafe|Ansi|Unicode))?\s+Function)\s+Range\b'
 )
 # white list of common strings matching the base64 regex, but which are not base64 strings (all lowercase):
-BASE64_WHITELIST = set(['thisdocument', 'thisworkbook', 'test', 'temp', 'http', 'open', 'exit', 'kernel32',
+BASE64_WHITELIST = set(['thisdocument', 'thisworkbook', 'test', 'temp', 'http', 'open', 'exit', 'dict', 'kernel32',
                         'virtualalloc', 'createthread', 'misc', 'vkey', 'hwndcallback', 'gold'])
 
 # regex to detect strings encoded with a specific Dridex algorithm
