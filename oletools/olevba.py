@@ -774,7 +774,7 @@ SUSPICIOUS_KEYWORDS = {
         ),
     'May detect virtualization':
     # sample: https://malwr.com/analysis/M2NjZWNmMjA0YjVjNGVhYmJlZmFhNWY4NmQxZDllZTY/
-        (r'SYSTEM\ControlSet001\Services\Disk\Enum', 'VIRTUAL', 'VMWARE', 'VBOX'),
+        (r'SYSTEM\ControlSet001\Services\Disk\Enum', 'VMWARE', 'VBOX'),
     'May detect Anubis Sandbox':
     # sample: https://malwr.com/analysis/M2NjZWNmMjA0YjVjNGVhYmJlZmFhNWY4NmQxZDllZTY/
     # NOTES: this sample also checks App.EXEName but that seems to be a bug, it works in VB6 but not in VBA

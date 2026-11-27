@@ -136,6 +136,21 @@ class TestOlevbaBasic(unittest.TestCase):
             [('Xor', 'May attempt to obfuscate specific strings (use option --deobf to deobfuscate)', 2)],
         )
 
+    def test_virtualization_indicator_ignores_generic_virtual_text(self):
+        description = 'May detect virtualization'
+        source = 'Throw "Unknown instruction in Lambda Virtual Machine: " & op.instruction'
+
+        self.assertFalse(any(
+            finding_description == description
+            for _, finding_description in detect_suspicious(source)
+        ))
+        for marker in ('VMWARE', 'VBOX', r'SYSTEM\ControlSet001\Services\Disk\Enum'):
+            with self.subTest(marker=marker):
+                self.assertTrue(any(
+                    finding_description == description
+                    for _, finding_description in detect_suspicious(f'marker = "{marker}"')
+                ))
+
     def test_run_indicator_requires_application_or_statement_position(self):
         def has_run_indicator(source):
             return any(
