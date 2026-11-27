@@ -811,6 +811,26 @@ SUSPICIOUS_KEYWORDS = {
         ('FORMULA.FILL',),
 }
 
+# These names indicate suspicious behavior only when used as VBA code, not as string data.
+SUSPICIOUS_KEYWORDS_CODE_ONLY = frozenset((
+    'Environ', 'ExpandEnvironmentStrings',
+    'Open', 'Write', 'Put', 'Output', 'Print #',
+    'FileCopy', 'CopyFile', 'CopyHere', 'CopyFolder', 'MoveHere', 'MoveFile', 'MoveFolder', 'Kill',
+    'CreateTextFile', 'WriteText', 'SaveToFile',
+    'Shell', 'vbNormal', 'vbNormalFocus', 'vbHide', 'vbMinimizedFocus', 'vbMaximizedFocus',
+    'vbNormalNoFocus', 'vbMinimizedNoFocus', 'Run', 'ShellExecute', 'ShellExecuteA',
+    'InvokeVerb', 'InvokeVerbEx', 'DoIt', 'ControlPanelItem', 'Create', 'MacScript', 'AppleScript',
+    'CALL', 'Application.Visible', 'ShowWindow', 'SW_HIDE', 'MkDir', 'ActiveWorkbook.SaveAs',
+    'Application.AltStartupPath', 'CreateObject', 'GetObject', 'ExecuteExcel4Macro', 'Windows',
+    'FindWindow', 'Lib', 'CreateThread', 'CreateUserThread', 'VirtualAlloc', 'VirtualAllocEx',
+    'RtlMoveMemory', 'WriteProcessMemory', 'SetContextThread', 'QueueApcThread',
+    'WriteVirtualMemory', 'VirtualProtect', 'SetTimer', 'URLDownloadToFileA', 'DownloadFile',
+    'DownloadString', 'SendKeys', 'AppActivate', 'CallByName', 'Chr', 'ChrB', 'ChrW',
+    'StrReverse', 'Xor', 'RegOpenKeyExA', 'RegOpenKeyEx', 'RegCloseKey', 'RegQueryValueExA',
+    'RegQueryValueEx', 'RegRead', 'GetVolumeInformationA', 'GetVolumeInformation', 'VBProject',
+    'VBComponents', 'CodeModule', 'AddFromString', 'Modules', 'FORMULA.FILL',
+))
+
 # Suspicious Keywords to be searched for directly as regex, without escaping
 SUSPICIOUS_KEYWORDS_REGEX = {
     'May use Word Document Variables to store and hide data':
@@ -843,6 +863,12 @@ XLM_ONLY_SUSPICIOUS_DESCRIPTIONS = frozenset((
     'Could contain a function that allows to call a DLL using Excel 4 Macros (XLM/XLF)',
 ))
 
+
+SUSPICIOUS_KEYWORDS_REGEX_CODE_ONLY = frozenset((
+    'May use Word Document Variables to store and hide data',
+    'May run a shellcode in memory',
+    'May run an executable file or a system command on a Mac (if combined with libc.dylib)',
+))
 
 def _is_xlm_only_suspicious(description):
     description = description.split(' (obfuscation:', 1)[0]
@@ -2314,14 +2340,21 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
             result += (vba_code.count('\n', 0, position) + 1,)
         results.append(result)
 
-    def find_matches(pattern):
+    def find_matches(pattern, code=None):
+        code = vba_code if code is None else code
         if include_locations:
-            return pattern.finditer(vba_code)
-        match = pattern.search(vba_code)
+            return pattern.finditer(code)
+        match = pattern.search(code)
         return (match,) if match else ()
 
+    code_only_vba_code = re_vba_string.sub(
+        lambda match: ' ' * len(match.group()), vba_code
+    )
     for description, keywords in SUSPICIOUS_KEYWORDS.items():
         for keyword in keywords:
+            search_code = (
+                code_only_vba_code if keyword in SUSPICIOUS_KEYWORDS_CODE_ONLY else vba_code
+            )
             # search using regex to detect word boundaries:
             # note: each keyword must be escaped if it contains special chars such as '\'
             if description == 'May open a file':
@@ -2330,7 +2363,7 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
                 pattern = _compile_run_pattern()
             else:
                 pattern = re.compile(r'(?i)\b' + re.escape(keyword) + r'\b')
-            for match in find_matches(pattern):
+            for match in find_matches(pattern, search_code):
                 if description == 'May open a file':
                     found_keyword = match.group(1)
                 elif description == 'May run an executable file or a system command' and keyword == 'Run':
@@ -2339,11 +2372,16 @@ def detect_suspicious(vba_code, obfuscation=None, include_locations=False):
                     found_keyword = match.group()
                 append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_REGEX.items():
+        search_code = (
+            code_only_vba_code
+            if description in SUSPICIOUS_KEYWORDS_REGEX_CODE_ONLY
+            else vba_code
+        )
         for keyword in keywords:
             # search using regex to detect word boundaries:
             # note: each keyword must NOT be escaped because it is an actual regex
             pattern = re.compile(r'(?i)\b' + keyword + r'\b')
-            for match in find_matches(pattern):
+            for match in find_matches(pattern, search_code):
                 found_keyword = match.group()
                 append_result(found_keyword, description, match.start())
     for description, keywords in SUSPICIOUS_KEYWORDS_NOREGEX.items():

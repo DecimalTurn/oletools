@@ -56,6 +56,86 @@ class TestOlevbaBasic(unittest.TestCase):
         self.assertFalse(has_open_indicator('Set workbook = Workbooks.Open(filePath)'))
         self.assertFalse(has_open_indicator('openFile = "safe"'))
 
+    def test_code_only_suspicious_keywords_ignore_quoted_strings(self):
+        code_only_keywords = (
+            'Xor', 'Chr', 'StrReverse', 'FileCopy', 'CreateObject', 'Shell', 'URLDownloadToFileA',
+        )
+        for keyword in code_only_keywords:
+            with self.subTest(keyword=keyword):
+                self.assertFalse(any(
+                    found_keyword.casefold() == keyword.casefold()
+                    for found_keyword, _ in detect_suspicious(f'value = "{keyword}"')
+                ))
+        self.assertFalse(any(
+            keyword.casefold() == 'run'
+            for keyword, _ in detect_suspicious('value = "object.Run"')
+        ))
+        self.assertFalse(any(
+            keyword.casefold() == 'xor'
+            for keyword, _ in detect_suspicious('value = "escaped ""Xor"" text"')
+        ))
+        quoted_xor_sources = (
+            'value = "Xor"',
+            'value = "escaped ""Xor"" text"',
+            'value = """Xor"""',
+            'value = "Xor" & "Chr"',
+            'value = "Xor""Chr"',
+            'value = "it\'s Xor"',
+        )
+        for source in quoted_xor_sources:
+            with self.subTest(source=source):
+                self.assertFalse(any(
+                    keyword.casefold() == 'xor'
+                    for keyword, _ in detect_suspicious(source)
+                ))
+        self.assertFalse(any(
+            finding_description == 'May use Word Document Variables to store and hide data'
+            for _, finding_description in detect_suspicious('value = ".Variables"')
+        ))
+        self.assertFalse(any(
+            finding_description == 'May run a shellcode in memory'
+            for _, finding_description in detect_suspicious('value = "EnumSystemLanguageGroupsW"')
+        ))
+
+        code_findings = set(detect_suspicious(
+            'value = left Xor right\n'
+            'value = Chr(65)\n'
+            'value = StrReverse("abc")\n'
+            'ThisDocument.Variables("payload")\n'
+            'EnumSystemLanguageGroupsW AddressOf Callback, 0, 0\n'
+            'FileCopy source, destination\n'
+            'Set shell = CreateObject("WScript.Shell")\n'
+            'URLDownloadToFileA 0, url, path, 0, 0'
+        ))
+        self.assertIn(('Xor', 'May attempt to obfuscate specific strings (use option --deobf to deobfuscate)'), code_findings)
+        self.assertIn(('Chr', 'May attempt to obfuscate specific strings (use option --deobf to deobfuscate)'), code_findings)
+        self.assertIn(('StrReverse', 'May attempt to obfuscate specific strings (use option --deobf to deobfuscate)'), code_findings)
+        self.assertIn(('FileCopy', 'May copy a file'), code_findings)
+        self.assertIn(('CreateObject', 'May create an OLE object'), code_findings)
+        self.assertIn(('URLDownloadToFileA', 'May download files from the Internet'), code_findings)
+        self.assertIn(('WScript.Shell', 'May run an executable file or a system command'), code_findings)
+
+        mixed_source = (
+            'value = "Xor" & left Xor right\n'
+            'value = """Xor""" Xor right\n'
+            'value = "left ""Xor"" tail" & _\n'
+            '    left Xor right\n'
+            'value = "" & left Xor right'
+        )
+        xor_locations = [
+            line_number
+            for keyword, finding_description, line_number in detect_suspicious(
+                mixed_source, include_locations=True
+            )
+            if keyword.casefold() == 'xor' and finding_description.endswith('deobfuscate)')
+        ]
+        self.assertEqual(xor_locations, [1, 2, 4, 5])
+
+        self.assertEqual(
+            detect_suspicious('value = "Xor"\nvalue = left Xor right', include_locations=True),
+            [('Xor', 'May attempt to obfuscate specific strings (use option --deobf to deobfuscate)', 2)],
+        )
+
     def test_run_indicator_requires_application_or_statement_position(self):
         def has_run_indicator(source):
             return any(
