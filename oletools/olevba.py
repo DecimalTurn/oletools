@@ -4076,6 +4076,21 @@ class VBA_Parser(object):
                     'module_name': vba_filename,
                     'line_number': line_number,
                 })
+            for encoded, decoded, line_number in detect_base64_strings_with_locations(
+                    module_code, has_custom_range_definition):
+                finding = ('Base64 String', decoded, encoded)
+                signature = ('Base64 String', decoded, encoded, module_index, line_number)
+                if finding not in source_finding_set or signature in located_findings:
+                    continue
+                located_findings.add(signature)
+                findings['vba_source_locations'].append({
+                    'type': 'Base64 String',
+                    'keyword': decoded,
+                    'description': encoded,
+                    'module_index': module_index,
+                    'module_name': vba_filename,
+                    'line_number': line_number,
+                })
             base64_finding = next((
                 finding for finding in source_finding_set
                 if finding[0] == 'Suspicious' and finding[1].casefold() == 'base64 strings'

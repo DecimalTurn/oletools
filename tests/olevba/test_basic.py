@@ -334,6 +334,14 @@ class TestOlevbaBasic(unittest.TestCase):
                 ],
                 [1, 2, 3],
             )
+            self.assertEqual(
+                [
+                    (location['keyword'], location['description'], location['line_number'])
+                    for location in findings['vba_source_locations']
+                    if location['type'] == 'Base64 String'
+                ],
+                [('Man', 'TWFu', 1), ('Man', 'TWFu', 2), ('ABC', 'QUJD', 3)],
+            )
         finally:
             parser.close()
 
