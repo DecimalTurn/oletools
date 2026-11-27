@@ -4026,9 +4026,10 @@ class VBA_Parser(object):
                     if not self.contains_xlm_macros and _is_xlm_only_suspicious(description):
                         continue
                     finding = (finding_type, keyword, description)
-                    signature = (finding_type, keyword.casefold(), description.casefold())
-                    if finding_type == 'Suspicious' and keyword.casefold() == 'lib':
-                        signature += (module_index, line_number)
+                    signature = (
+                        finding_type, keyword.casefold(), description.casefold(),
+                        module_index, line_number,
+                    )
                     if finding not in source_finding_set or signature in located_findings:
                         continue
                     located_findings.add(signature)

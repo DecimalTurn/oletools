@@ -443,6 +443,31 @@ class TestOlevbaBasic(unittest.TestCase):
         finally:
             parser.close()
 
+    def test_createobject_finding_includes_each_vba_source_location(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = (
+            'Set first = CreateObject("Scripting.FileSystemObject")\n'
+            'Set second = CreateObject("WScript.Shell")'
+        )
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: ''
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertEqual(
+                [location['line_number'] for location in findings['vba_source_locations']
+                 if location['type'] == 'Suspicious' and location['keyword'] == 'CreateObject'],
+                [1, 2],
+            )
+        finally:
+            parser.close()
+
     def test_ioc_finding_includes_each_vba_source_location(self):
         filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
         parser = VBA_Parser(filename)
