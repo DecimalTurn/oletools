@@ -2264,13 +2264,19 @@ def detect_autoexec(vba_code, obfuscation=None, include_locations=False):
             result += (vba_code.count('\n', 0, position) + 1,)
         results.append(result)
 
+    def find_matches(pattern):
+        if include_locations:
+            return pattern.finditer(vba_code)
+        match = pattern.search(vba_code)
+        return (match,) if match else ()
+
     # 1) simple strings, without regex
     for description, keywords in AUTOEXEC_KEYWORDS.items():
         for keyword in keywords:
             #TODO: if keyword is already a compiled regex, use it as-is
             # search using regex to detect word boundaries:
-            match = re.search(r'(?i)\b' + re.escape(keyword) + r'\b', vba_code)
-            if match:
+            pattern = re.compile(r'(?i)\b' + re.escape(keyword) + r'\b')
+            for match in find_matches(pattern):
                 found_keyword = match.group()
                 append_result(found_keyword, description, match.start())
     # 2) regex
@@ -2278,8 +2284,8 @@ def detect_autoexec(vba_code, obfuscation=None, include_locations=False):
         for keyword in keywords:
             #TODO: if keyword is already a compiled regex, use it as-is
             # search using regex to detect word boundaries:
-            match = re.search(r'(?i)\b' + keyword + r'\b', vba_code)
-            if match:
+            pattern = re.compile(r'(?i)\b' + keyword + r'\b')
+            for match in find_matches(pattern):
                 found_keyword = match.group()
                 append_result(found_keyword, description, match.start())
     return results

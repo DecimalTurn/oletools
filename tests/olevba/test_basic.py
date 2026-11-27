@@ -468,6 +468,28 @@ class TestOlevbaBasic(unittest.TestCase):
         finally:
             parser.close()
 
+    def test_autoexec_finding_includes_each_vba_source_location(self):
+        filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
+        parser = VBA_Parser(filename)
+        source = 'Call Workbook_Open\nCall Workbook_Open'
+        try:
+            parser.get_vba_code_all_modules = lambda **kwargs: source
+            parser.extract_macros = lambda: [
+                ('module', 'VBA/Module1', 'Module1', source)
+            ]
+            parser.extract_form_strings = lambda: []
+            parser.extract_pcode = lambda: ''
+
+            findings = parser.analyze_macros_by_source()
+
+            self.assertEqual(
+                [location['line_number'] for location in findings['vba_source_locations']
+                 if location['type'] == 'AutoExec' and location['keyword'] == 'Workbook_Open'],
+                [1, 2],
+            )
+        finally:
+            parser.close()
+
     def test_ioc_finding_includes_each_vba_source_location(self):
         filename = join(DATA_BASE_DIR, 'olevba', 'sample_with_vba.ppt')
         parser = VBA_Parser(filename)
